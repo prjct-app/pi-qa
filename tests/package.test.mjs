@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { test } from 'node:test';
+import { DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+
+test('Pi discovers exactly the extension declared by the package manifest', async () => {
+  const agentDir = await realpath(await mkdtemp(join(tmpdir(), 'pi-qa-package-')));
+  try {
+    await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ packages: [root] }));
+    const loader = new DefaultResourceLoader({ cwd: agentDir, agentDir, noContextFiles: true });
+    await loader.reload();
+    const extensions = loader.getExtensions();
+    assert.deepEqual(extensions.errors, []);
+    assert.equal(extensions.extensions.length, 1);
+    assert.equal(resolve(extensions.extensions[0].path), resolve(root, 'index.ts'));
+    const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+    assert.equal(manifest.dependencies['@typesafe-ai/sdk'], '0.6.0');
+    assert.equal(manifest.peerDependencies['@earendil-works/pi-coding-agent'], '*');
+    assert.equal(manifest.piBuild.external.includes('@napi-rs/keyring'), true);
+    assert.equal(manifest.dependencies['@typesafe-ai/sdk'] !== undefined, true);
+  } finally { await rm(agentDir, { recursive: true, force: true }); }
+});

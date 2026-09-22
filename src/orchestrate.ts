@@ -1,0 +1,263 @@
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { deriveContract, sanitizeContract, ticketStale, type IntentContext } from './contract.ts';
+import { markKeyRejected, resolveKey, type SecretStore } from './credentials.ts';
+import { evaluateEvidence } from './evaluate.ts';
+import { createJevClient, type JevFactory } from './jev.ts';
+import { formatReport } from './report.ts';
+import { sdkRunner, type QaRunner } from './runner.ts';
+import type { EvaluationContract, QaRunRecord, ReviewerReport, TesterReport } from './schema.ts';
+import { emptyReviewer, emptyTester } from './schema.ts';
+import { captureSnapshot, currentFingerprint, type CapturedSnapshot } from './snapshot.ts';
+import { prepareRunDir, readLatest, readRun, writeEval, writeLatest, writeRun } from './store.ts';
+import { agentHome, loadSettings, prjctHome, type QaSettings } from './settings.ts';
+import { decideVerdict } from './verdict.ts';
+import { materializeWorkspace } from './workspace.ts';
+import type { GitExec } from './git.ts';
+import { checkReviewerReport, checkTesterReport } from './schema.ts';
+import { recommendedActions } from './actions.ts';
+import { writeArtifacts } from './export.ts';
+import type { QaProgressEvent } from './progress.ts';
+
+export type OrchestrateInput = {
+  cwd: string;
+  intent: IntentContext;
+  pendingContract?: unknown;
+  base?: string;
+  model: { provider: string; id: string };
+  agentDir?: string;
+  store: SecretStore;
+  settings?: QaSettings;
+  runner?: QaRunner;
+  jevFactory?: JevFactory;
+  git?: GitExec;
+  env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
+  home?: string;
+  extensionPaths?: string[];
+  now?: () => string;
+  /** Stable run id supplied by the command layer so status shows the real id from the first moment. */
+  runId?: string;
+  scope?: 'change' | 'target';
+  filesystemTarget?: boolean;
+  targetPaths?: string[];
+  onProgress?: (event: QaProgressEvent) => void;
+  /** Notifies the command layer once the QA agent is in flight (or the run resolved without it). */
+  onActive?: (update: { runId: string; done: Promise<unknown> }) => void;
+};
+
+export async function runQa(input: OrchestrateInput): Promise<QaRunRecord> {
+  const started = Date.now();
+  const settings = input.settings ?? loadSettings(input.agentDir ?? agentHome());
+  input.onProgress?.({ kind: 'stage', stage: 'capturing', message: input.scope === 'target' ? 'Capturing available evidence for the QA target…' : 'Capturing the current change…' });
+  const captured = await captureSnapshot(input.cwd, { git: input.git, settings, base: input.base, now: input.now, runId: input.runId, scope: input.scope, filesystemTarget: input.filesystemTarget, targetPaths: input.targetPaths });
+  input.onProgress?.({ kind: 'snapshot', fingerprint: captured.snapshot.fingerprint, paths: captured.snapshot.paths.length });
+  const { contract, problems } = buildContract(input.pendingContract, input.intent, captured);
+  const runDir = await prepareRunDir(captured.snapshot.runId, input.home ?? prjctHome());
+  await persistSnapshot(runDir, captured, contract);
+  if (captured.snapshot.resolutionError) {
+    input.onActive?.({ runId: captured.snapshot.runId, done: Promise.resolve() });
+    return finish({
+      input, captured, contract, settings, started, runDir,
+      contractProblems: problems,
+      reviewer: { role: 'reviewer', status: 'failed', error: captured.snapshot.resolutionError, latencyMs: 0 },
+      tester: { role: 'tester', status: 'failed', error: captured.snapshot.resolutionError, latencyMs: 0 },
+      reviewerReport: emptyReviewer(), testerReport: emptyTester(),
+      stale: false,
+    });
+  }
+  input.onProgress?.({ kind: 'stage', stage: 'materializing', message: 'Preparing the isolated QA workspace…' });
+  const qaWorkspace = await materializeWorkspace(captured, join(runDir, 'qa'), { git: input.git });
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  input.signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    input.onProgress?.({ kind: 'stage', stage: 'agents', message: 'QA is designing and executing test cases…' });
+    input.onProgress?.({ kind: 'agent', role: 'tester', status: 'running' });
+    const qaPromise = (input.runner ?? sdkRunner)({
+      role: 'tester', snapshot: captured.snapshot, contract, workspace: qaWorkspace.path,
+      artifactsDir: join(runDir, 'artifacts', 'browser'), model: input.model, agentDir: input.agentDir,
+      timeoutMs: settings.timeoutMs, signal: controller.signal, settings, extensionPaths: input.extensionPaths,
+      briefing: environmentBriefing(input.intent, qaWorkspace.notes),
+      onProgress: message => input.onProgress?.({ kind: 'stage', stage: 'agents', message }),
+    });
+    input.onActive?.({ runId: captured.snapshot.runId, done: qaPromise.then(() => undefined, () => undefined) });
+    const tester = await qaPromise;
+    input.onProgress?.({ kind: 'agent', role: 'tester', status: tester.status, latencyMs: tester.latencyMs, error: tester.error });
+    input.onProgress?.({ kind: 'stage', stage: 'staleness', message: 'Checking that the evaluated target is still current…' });
+    const fingerprint = await currentFingerprint(input.cwd, { git: input.git, settings, base: input.base, scope: captured.snapshot.scope, filesystemTarget: Boolean(captured.snapshot.targetPaths), targetPaths: captured.snapshot.targetPaths });
+    const stale = fingerprint !== captured.snapshot.fingerprint || ticketStale(contract, input.intent.ticket?.fingerprint);
+    return finish({
+      input, captured, contract, settings, started, runDir, stale,
+      contractProblems: problems,
+      workspaceNotes: qaWorkspace.notes.map(note => `QA workspace: ${note}`),
+      reviewer: { role: 'reviewer', status: 'completed', report: emptyReviewer(), latencyMs: 0 },
+      tester,
+      reviewerReport: emptyReviewer(),
+      testerReport: asTester(tester.report),
+    });
+  } finally {
+    input.signal?.removeEventListener('abort', onAbort);
+    await qaWorkspace.cleanup();
+  }
+}
+
+export async function evaluateExisting(runId: string, input: Omit<OrchestrateInput, 'pendingContract'>): Promise<QaRunRecord> {
+  input.onProgress?.({ kind: 'stage', stage: 'capturing', message: 'Loading the preserved QA evidence…' });
+  const settings = input.settings ?? loadSettings(input.agentDir ?? agentHome());
+  const record = await readRun(join((input.home ?? prjctHome()), 'pi-qa', 'runs', runId));
+  // Re-evaluate the checkout captured by the run, not whichever cwd the new Pi session happens to use.
+  const fingerprint = await currentFingerprint(record.snapshot.cwd, { git: input.git, settings, base: record.snapshot.base ?? undefined, scope: record.snapshot.scope, filesystemTarget: Boolean(record.snapshot.targetPaths), targetPaths: record.snapshot.targetPaths });
+  const stale = fingerprint !== record.snapshot.fingerprint || ticketStale(record.contract, input.intent.ticket?.fingerprint);
+  if (stale) {
+    const next = {
+      ...record,
+      verdict: 'STALE' as const,
+      stale: true,
+      explanation: 'The snapshot changed. Evaluation of the previous run does not apply.',
+      nextVerification: 'Run /qa again.',
+      recommendedActions: recommendedActions({ verdict: 'STALE', contract: record.contract, jevAvailable: record.jev.available, nextVerification: 'Run /qa again.' }),
+    };
+    await writeEval(join((input.home ?? prjctHome()), 'pi-qa', 'runs', runId), next);
+    input.onProgress?.({ kind: 'complete', record: next });
+    return next;
+  }
+  return finish({
+    input, settings, started: Date.now(),
+    captured: { snapshot: record.snapshot, blobs: new Map() },
+    contract: record.contract,
+    contractProblems: record.contractProblems,
+    runDir: join((input.home ?? prjctHome()), 'pi-qa', 'runs', runId),
+    reviewer: record.agents.reviewer,
+    tester: record.agents.tester,
+    reviewerReport: asReviewer(record.agents.reviewer.report),
+    testerReport: asTester(record.agents.tester.report),
+    stale: false,
+  });
+}
+
+export { formatReport };
+
+const buildContract = (pending: unknown, intent: IntentContext, captured: CapturedSnapshot): { contract: EvaluationContract; problems: string[] } => {
+  if (pending) {
+    const sanitized = sanitizeContract(pending, intent);
+    if (sanitized.contract.items.length) return sanitized;
+    return { contract: deriveContract(intent, captured.snapshot.paths.map(path => path.path), intent.userRequest?.english ?? intent.userRequest?.text), problems: sanitized.problems };
+  }
+  return { contract: deriveContract(intent, captured.snapshot.paths.map(path => path.path), intent.userRequest?.english ?? intent.userRequest?.text), problems: [] };
+};
+
+const persistSnapshot = async (runDir: string, captured: CapturedSnapshot, contract: EvaluationContract): Promise<void> => {
+  await writeFile(join(runDir, 'snapshot.json'), `${JSON.stringify(captured.snapshot, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(join(runDir, 'contract.json'), `${JSON.stringify(contract, null, 2)}\n`, { mode: 0o600 });
+};
+
+const finish = async (args: {
+  input: OrchestrateInput;
+  captured: CapturedSnapshot;
+  contract: EvaluationContract;
+  settings: QaSettings;
+  started: number;
+  runDir: string;
+  reviewer: QaRunRecord['agents']['reviewer'];
+  tester: QaRunRecord['agents']['tester'];
+  reviewerReport: ReviewerReport;
+  testerReport: TesterReport;
+  stale: boolean;
+  contractProblems?: string[];
+  workspaceNotes?: string[];
+}): Promise<QaRunRecord> => {
+  args.input.onProgress?.({ kind: 'stage', stage: 'jev', message: 'Evaluating all test cases in one batch…' });
+  args.input.onProgress?.({ kind: 'jev', status: 'running', message: 'Evaluating all test cases in one batch…' });
+  const resolved = await resolveKey(args.input.store, args.input.env);
+  const client = resolved.key ? (args.input.jevFactory ?? createJevClient)(resolved.key, args.settings) : undefined;
+  const jevStarted = Date.now();
+  const evaluated = await evaluateEvidence({
+    snapshot: args.captured.snapshot,
+    blobs: args.captured.blobs,
+    contract: args.contract,
+    reviewer: args.reviewerReport,
+    tester: args.testerReport,
+    executions: args.tester.executions,
+    client,
+    settings: args.settings,
+    signal: args.input.signal,
+  });
+  const decisions = [...evaluated.testJev, ...evaluated.criteria.flatMap(item => item.jev)];
+  const jevAvailable = Boolean(client) && decisions.length > 0 && decisions.every(decision => decision.label !== 'unavailable' && decision.label !== 'timeout');
+  const authenticationRejected = decisions.some(decision => /\b401\b|cannot authenticate|authenticationerror/i.test(decision.error ?? ''));
+  if (authenticationRejected && resolved.source === 'keyring' && resolved.key) await markKeyRejected(args.input.store, resolved.key).catch(() => undefined);
+  args.input.onProgress?.({ kind: 'jev', status: jevAvailable ? 'completed' : 'unavailable', message: jevAvailable ? 'Test-case evaluation complete.' : evaluated.jev.error ?? 'Test-case evaluation unavailable.' });
+  const decided = decideVerdict({
+    contract: args.contract,
+    snapshot: args.captured.snapshot,
+    checks: evaluated.checks,
+    criteria: evaluated.criteria,
+    reviewer: args.reviewer,
+    tester: args.tester,
+    reviewerReport: args.reviewerReport,
+    testerReport: args.testerReport,
+    findingJev: [],
+    findingImpactJev: [],
+    testJev: evaluated.testJev,
+    testFailureJev: [],
+    stale: args.stale,
+    jevAvailable,
+    evaluatorConfigured: Boolean(resolved.key),
+    evaluatorError: evaluated.jev.error,
+    snapshotError: args.captured.snapshot.resolutionError,
+  });
+  const record: QaRunRecord = {
+    runId: args.captured.snapshot.runId,
+    startedAt: args.captured.snapshot.capturedAt,
+    finishedAt: new Date().toISOString(),
+    verdict: decided.verdict,
+    explanation: decided.explanation,
+    nextVerification: decided.nextVerification,
+    snapshot: args.captured.snapshot,
+    contract: args.contract,
+    agents: { reviewer: args.reviewer, tester: args.tester },
+    checks: evaluated.checks,
+    criteria: evaluated.criteria,
+    jev: {
+      configured: Boolean(resolved.key),
+      modelPin: args.settings.jevModel,
+      modelActual: evaluated.jev.modelActual,
+      available: jevAvailable,
+      error: evaluated.jev.error,
+      keyFingerprint: resolved.fingerprint,
+      credentialSource: resolved.source,
+      inputTokens: evaluated.jev.inputTokens,
+      outputTokens: evaluated.jev.outputTokens,
+      latencyMs: Date.now() - jevStarted,
+    },
+    unresolvedRisks: [...decided.unresolvedRisks, ...args.workspaceNotes ?? []],
+    contractProblems: args.contractProblems?.length ? args.contractProblems : undefined,
+    recommendedActions: recommendedActions({ verdict: decided.verdict, contract: args.contract, jevAvailable, nextVerification: decided.nextVerification }),
+    findingJev: [],
+    findingImpactJev: [],
+    testJev: evaluated.testJev,
+    testFailureJev: [],
+    stale: args.stale,
+    latencyMs: Date.now() - args.started,
+  };
+  args.input.onProgress?.({ kind: 'stage', stage: 'persisting', message: 'Saving the auditable QA record and artifacts…' });
+  const exported = await writeArtifacts(record, join(args.runDir, 'artifacts'));
+  const completeRecord: QaRunRecord = { ...record, exports: exported };
+  await writeRun(args.runDir, completeRecord);
+  await writeLatest(completeRecord.runId, args.input.home ?? prjctHome());
+  args.input.onProgress?.({ kind: 'complete', record: completeRecord });
+  return completeRecord;
+};
+
+export { readLatest };
+
+const environmentBriefing = (intent: IntentContext, workspaceNotes: string[]): string => [
+  intent.memory ? `Project memory (${intent.memory.ref}):\n${intent.memory.text}` : '',
+  intent.plan ? `Current plan (${intent.plan.ref}):\n${intent.plan.text}` : '',
+  intent.ticket ? `Ticket (${intent.ticket.ref}):\n${intent.ticket.text}` : '',
+  workspaceNotes.length ? `Workspace preparation:\n${workspaceNotes.join('\n')}` : '',
+].filter(Boolean).join('\n\n');
+
+const asReviewer = (value: unknown): ReviewerReport => checkReviewerReport(value) ? value : emptyReviewer();
+const asTester = (value: unknown): TesterReport => checkTesterReport(value) ? value : emptyTester();
