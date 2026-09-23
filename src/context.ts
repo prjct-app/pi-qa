@@ -1,16 +1,14 @@
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { fingerprintText, type IntentContext } from './contract.ts';
 import { clip, plain } from './text.ts';
 
-const TICKET_FILES = ['TICKET.md', '.pi/ticket.md', 'ticket.md'] as const;
-
-export async function loadIntent(ctx: ExtensionContext, cwd: string): Promise<IntentContext> {
+export async function loadIntent(ctx: ExtensionContext, cwd: string, request?: string): Promise<IntentContext> {
   const entries = ctx.sessionManager.getBranch();
   const user = lastUserText(entries);
-  const plan = lastPlan(entries);
-  const ticket = await loadTicket(cwd);
+  const plan = request || user ? undefined : lastPlan(entries);
+  const ticket = await loadTicket(cwd, request ?? user);
   const memory = projectMemory(ctx.getSystemPrompt());
   return {
     userRequest: user ? { text: user, ref: 'session:user' } : undefined,
@@ -43,29 +41,40 @@ const lastPlan = (entries: readonly { type?: string; customType?: string; data?:
   return { text, items, ref: 'session:plan' };
 };
 
-const loadTicket = async (cwd: string): Promise<IntentContext['ticket']> => {
-  const found = await firstFile(cwd, TICKET_FILES);
-  if (!found) return undefined;
-  const sections = splitSections(found.text);
+const loadTicket = async (cwd: string, request?: string): Promise<IntentContext['ticket']> => {
+  if (!request) return undefined;
+  const pathMatch = /(?:^|\s)(docs\/tickets\/[a-zA-Z0-9][\w.-]*\.md)(?=$|[\s).,;])/i.exec(request);
+  const numbers = [...request.matchAll(/\bticket\s*#?([0-9]+)\b/gi)].map(match => match[1]!);
+  if (!pathMatch && new Set(numbers).size > 1) throw new Error('Multiple tickets named. Specify one docs/tickets/<name>.md path.');
+  const requested = pathMatch?.[1] ?? (numbers[0] ? await ticketByNumber(cwd, numbers[0]) : undefined);
+  if (!requested) {
+    if (numbers.length) throw new Error(`No unique ticket ${numbers[0]} found in docs/tickets. Specify its path.`);
+    return undefined;
+  }
+  const path = join(cwd, requested);
+  const [docs, tickets, info] = await Promise.all([
+    lstat(join(cwd, 'docs')),
+    lstat(join(cwd, 'docs/tickets')),
+    lstat(path),
+  ]);
+  if (!docs.isDirectory() || !tickets.isDirectory()) throw new Error('Ticket directories must not be symbolic links.');
+  if (!info.isFile() || info.size > 256_000) throw new Error(`Ticket must be a regular file under 256 KB: ${requested}`);
+  const text = await readFile(path, 'utf8');
+  const sections = splitSections(text);
   return {
-    text: found.text,
+    text,
     ac: bullets(sections['acceptance criteria'] ?? sections.ac ?? ''),
     dor: bullets(sections['definition of ready'] ?? sections.dor ?? ''),
     dod: bullets(sections['definition of done'] ?? sections.dod ?? ''),
-    ref: found.path,
-    fingerprint: fingerprintText(found.text),
+    ref: requested,
+    fingerprint: fingerprintText(text),
   };
 };
 
-const firstFile = async (cwd: string, names: readonly string[]): Promise<{ path: string; text: string } | undefined> => {
-  if (names.length === 0) return undefined;
-  const path = join(cwd, names[0]!);
-  try {
-    const text = await readFile(path, 'utf8');
-    return { path, text };
-  } catch {
-    return firstFile(cwd, names.slice(1));
-  }
+const ticketByNumber = async (cwd: string, number: string): Promise<string | undefined> => {
+  const entries = await readdir(join(cwd, 'docs/tickets')).catch(() => []);
+  const matches = entries.filter(name => name.endsWith('.md') && name.match(/^\d+/)?.[0] === number);
+  return matches.length === 1 ? `docs/tickets/${matches[0]}` : undefined;
 };
 
 const splitSections = (text: string): Record<string, string> =>

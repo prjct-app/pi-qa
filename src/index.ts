@@ -320,7 +320,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     }
     ctx.ui.setStatus?.('qa', request ? 'capturing QA target…' : 'capturing snapshot…');
     try {
-      const context = await loadIntent(ctx, runCwd);
+      const context = await loadIntent(ctx, runCwd, targetMission);
       const intent = await inEnglish(targetMission ? { ...context, userRequest: { text: targetMission, ref: 'command:/qa' } } : context, ctx);
       live.state.mission = intent.userRequest?.english ?? intent.userRequest?.text ?? 'Inspect the available target and identify what cannot be established.';
       const record = await runQa({
@@ -383,7 +383,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     }
     const record = await evaluateExisting(id, {
       cwd: ctx.cwd,
-      intent: await loadIntent(ctx, ctx.cwd),
+      intent: {},
       model: parentModel(ctx) ?? { provider: 'none', id: 'none' },
       store,
       settings: deps.settings ?? loadSettings(),

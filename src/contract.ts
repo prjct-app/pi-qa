@@ -34,8 +34,8 @@ export function sanitizeContract(raw: unknown, intent: IntentContext): { contrac
     contract: {
       ...raw,
       items: unique,
-      ticketRef: raw.ticketRef ?? intent.ticket?.ref,
-      ticketFingerprint: raw.ticketFingerprint ?? intent.ticket?.fingerprint,
+      ticketRef: intent.ticket?.ref,
+      ticketFingerprint: intent.ticket?.fingerprint,
     },
     problems,
   };

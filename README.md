@@ -27,7 +27,7 @@ The script builds `~/.pi/agent/builds/pi-qa`; add `builds/pi-qa` to the Pi packa
 |---|---|
 | `/qa <mission>` | Evaluate an explicit target, for example `/qa smoke test https://app.example.com/login` |
 | `/qa --target <path> <mission>` | Capture and evaluate an explicit local file or directory, including non-Git targets |
-| `/qa` | Derive the mission from the current Pi request, plan, ticket, and diff |
+| `/qa` | Derive the mission from the current Pi request or current diff |
 | `/qa --base <ref>` | Add a local Git comparison base. Remotes are not fetched |
 | `/qa status` | Active or last run |
 | `/qa cancel` | Abort the active run; keep partial evidence |
@@ -48,17 +48,17 @@ QA never runs destructive git commands against your checkout. The QA agent uses 
 
 ## Contract
 
-A ticket is optional. When `TICKET.md` or `.pi/ticket.md` exists, acceptance criteria, DoR, and DoD are included with source references.
+Tickets are included only when the current request names a ticket number (for example, `/qa test ticket 07`) or an explicit `docs/tickets/<name>.md` path. The referenced file supplies acceptance criteria, DoR, and DoD. QA never reads `.pi/ticket.md` or copies it into a QA workspace; contracts and snapshots live under `~/.prjct/pi-qa/runs/<id>/`.
 
 For local artifacts, use an explicit path: `/qa --target ./pi-qa smoke test this extension`. Dependencies, Git metadata, `.env*`, private keys, certificates, and prior QA exports are excluded from filesystem target capture.
 
-The command text becomes a required `user_request` criterion. Without command text, QA uses the latest conversational entry only when it is actually from the user, plus any plan, ticket, and diff; it never searches backward for an unrelated old request. Every item is `user_request`, `ticket`, `plan`, or `inferred_from_diff`; inferred items never prove unstated intent. Sanitization problems remain in the run record.
+The command text becomes a required `user_request` criterion. Without command text, QA uses the latest conversational entry only when it is actually from the user; a plan is considered only when no current user request exists. It never searches backward for an unrelated old request or implicitly loads a project ticket. Every item is `user_request`, `ticket`, `plan`, or `inferred_from_diff`; inferred items never prove unstated intent. Sanitization problems remain in the run record.
 
 The main model may submit a contract with the `pi_qa_contract` tool before `/qa`. Relabeled inferred items are reclassified.
 
 ## QA agent
 
-One isolated Pi session designs and executes the smallest relevant set of test cases. Every case records expected behavior, its source, procedure, observation, execution receipts, and artifacts. The agent receives the captured changes plus bounded current plan, ticket, and pi-memory context when available; memory is untrusted context and must be verified.
+One isolated Pi session designs and executes the smallest relevant set of test cases. Every case records expected behavior, its source, procedure, observation, execution receipts, and artifacts. The agent receives captured changes and the explicitly selected ticket when available; other context is untrusted and must not override the requested task.
 
 Expected behavior comes from the user, ticket, spec, or existing tests. A default smoke expectation is limited to successful load/launch, no crash, and a responding primary command or endpoint. If none is defensible, the case is `BLOCKED`; QA does not invent PASS.
 

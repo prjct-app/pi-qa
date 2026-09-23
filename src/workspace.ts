@@ -52,6 +52,8 @@ export async function materializeWorkspace(captured: CapturedSnapshot, runDir: s
     await mkdir(dest, { recursive: true, mode: 0o700 });
   }
   await overlay(dest, captured);
+  // A tracked ambient ticket can arrive through the base worktree or archive.
+  await unlink(join(dest, '.pi', 'ticket.md')).catch(() => undefined);
   const dependencies = await copyDependencyTrees(cwd, dest);
   return {
     path: dest,
