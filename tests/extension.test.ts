@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { harness } from './harness.ts';
 import { fakeJev, fakeRunner, memoryStore } from './fixtures/fakes.ts';
-import { gitRepo, writeWorktree } from './fixtures/git-repo.ts';
+import { commitFile, gitRepo, writeWorktree } from './fixtures/git-repo.ts';
 import { defaultSettings } from '../src/settings.ts';
 import { CONTRACT_TOOL } from '../src/schema.ts';
 
@@ -122,6 +122,81 @@ test('/qa accepts an explicit QA mission without requiring a diff', async () => 
     assert.deepEqual(launched.map(item => item.role), ['tester']);
     assert.ok(launched.every(item => item.scope === 'target'));
     assert.ok(launched.every(item => item.criterion === 'smoke test https://example.test/login'));
+  } finally {
+    await host.emit('session_shutdown');
+    await rm(dir, { recursive: true, force: true });
+    await rm(dest, { recursive: true, force: true });
+  }
+});
+
+test('explicit ticket QA ignores ambient .pi/ticket.md and isolates successive run contracts', async () => {
+  const dir = await gitRepo();
+  const dest = await mkdtemp(join(tmpdir(), 'qa-ticket-isolation-'));
+  await writeWorktree(dir, '.pi/ticket.md', '# Ticket 03\n## Acceptance Criteria\n- Landing page must load\n');
+  await writeWorktree(dir, 'docs/tickets/07-onboarding.md', '# Ticket 07\n## Acceptance Criteria\n- Onboarding works\n');
+  const seen: string[] = [];
+  const host = harness(dir, {
+    dependencies: {
+      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
+      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      runner: async input => {
+        seen.push(input.contract.items.map(item => item.text).join(' '));
+        await assert.rejects(readFile(join(input.workspace, '.pi/ticket.md'), 'utf8'), { code: 'ENOENT' });
+        assert.equal(input.snapshot.untracked.includes('.pi/ticket.md'), false);
+        assert.doesNotMatch(input.snapshot.combinedPatch, /Landing page/);
+        return fakeRunner({})(input);
+      },
+    },
+  });
+  try {
+    await host.command('prueba el ticket 07');
+    await host.tool(CONTRACT_TOOL, {
+      description: 'stale ticket 07 contract',
+      items: [{ id: 'T-AC1', text: 'Onboarding works', source: 'ticket', sourceRef: 'docs/tickets/07-onboarding.md', required: true, observe: 'test it' }],
+      invariants: [], regressionRisks: [], definitionOfReady: [], definitionOfDone: [],
+      ticketRef: 'docs/tickets/07-onboarding.md', ticketFingerprint: 'stale',
+    });
+    await host.command('smoke test login');
+    await commitFile(dir, '.pi/ticket.md', '# Ticket 03\n## Acceptance Criteria\n- Landing page must load\n', 'seed tracked ticket');
+    await host.command('smoke test login');
+    assert.match(seen[0]!, /Onboarding works/);
+    assert.doesNotMatch(seen[0]!, /Landing page/);
+    assert.doesNotMatch(seen[1]!, /Onboarding works|Landing page/);
+    assert.doesNotMatch(seen[2]!, /Onboarding works|Landing page/);
+    const runs = (await readdir(join(dest, 'pi-qa/runs'))).filter(name => name !== 'latest');
+    assert.equal(runs.length, 3);
+    const contracts = await Promise.all(runs.map(id => readFile(join(dest, 'pi-qa/runs', id, 'contract.json'), 'utf8')));
+    assert.equal(contracts.filter(text => text.includes('Onboarding works')).length, 1);
+    assert.ok(contracts.every(text => !text.includes('Landing page')));
+    await assert.rejects(readFile(join(dir, '.pi/qa-contract.json'), 'utf8'), { code: 'ENOENT' });
+  } finally {
+    await host.emit('session_shutdown');
+    await rm(dir, { recursive: true, force: true });
+    await rm(dest, { recursive: true, force: true });
+  }
+});
+
+test('only the explicitly selected ticket can stale its QA run', async () => {
+  const dir = await gitRepo();
+  const dest = await mkdtemp(join(tmpdir(), 'qa-selected-ticket-'));
+  await writeWorktree(dir, '.pi/ticket.md', '# Ticket 03\n- Old landing requirement\n');
+  await writeWorktree(dir, 'docs/tickets/07-onboarding.md', '# Ticket 07\n## Acceptance Criteria\n- Onboarding works\n');
+  const host = harness(dir, {
+    dependencies: {
+      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
+      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      runner: async input => {
+        await writeWorktree(dir, '.pi/ticket.md', '# Ticket 03\n- Changed landing requirement\n');
+        await writeWorktree(dir, 'docs/tickets/07-onboarding.md', '# Ticket 07\n## Acceptance Criteria\n- Changed onboarding requirement\n');
+        return fakeRunner({})(input);
+      },
+    },
+  });
+  try {
+    await host.command('test ticket 07');
+    const id = (await readFile(join(dest, 'pi-qa/runs/latest'), 'utf8')).trim();
+    const report = JSON.parse(await readFile(join(dest, 'pi-qa/runs', id, 'report.json'), 'utf8')) as { verdict: string };
+    assert.equal(report.verdict, 'STALE');
   } finally {
     await host.emit('session_shutdown');
     await rm(dir, { recursive: true, force: true });

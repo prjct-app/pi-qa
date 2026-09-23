@@ -1,13 +1,13 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { deriveContract, sanitizeContract, ticketStale, type IntentContext } from './contract.ts';
+import { deriveContract, fingerprintText, sanitizeContract, ticketStale, type IntentContext } from './contract.ts';
 import { markKeyRejected, resolveKey, type SecretStore } from './credentials.ts';
 import { evaluateEvidence } from './evaluate.ts';
 import { createJevClient, type JevFactory } from './jev.ts';
 import { formatReport } from './report.ts';
 import { sdkRunner, type QaRunner } from './runner.ts';
 import type { EvaluationContract, QaRunRecord, ReviewerReport, TesterReport } from './schema.ts';
-import { emptyReviewer, emptyTester } from './schema.ts';
+import { checkContract, emptyReviewer, emptyTester } from './schema.ts';
 import { captureSnapshot, currentFingerprint, type CapturedSnapshot } from './snapshot.ts';
 import { prepareRunDir, readLatest, readRun, writeEval, writeLatest, writeRun } from './store.ts';
 import { agentHome, loadSettings, prjctHome, type QaSettings } from './settings.ts';
@@ -86,7 +86,7 @@ export async function runQa(input: OrchestrateInput): Promise<QaRunRecord> {
     input.onProgress?.({ kind: 'agent', role: 'tester', status: tester.status, latencyMs: tester.latencyMs, error: tester.error });
     input.onProgress?.({ kind: 'stage', stage: 'staleness', message: 'Checking that the evaluated target is still current…' });
     const fingerprint = await currentFingerprint(input.cwd, { git: input.git, settings, base: input.base, scope: captured.snapshot.scope, filesystemTarget: Boolean(captured.snapshot.targetPaths), targetPaths: captured.snapshot.targetPaths });
-    const stale = fingerprint !== captured.snapshot.fingerprint || ticketStale(contract, input.intent.ticket?.fingerprint);
+    const stale = fingerprint !== captured.snapshot.fingerprint || await selectedTicketStale(contract, input.cwd);
     return finish({
       input, captured, contract, settings, started, runDir, stale,
       contractProblems: problems,
@@ -108,7 +108,7 @@ export async function evaluateExisting(runId: string, input: Omit<OrchestrateInp
   const record = await readRun(join((input.home ?? prjctHome()), 'pi-qa', 'runs', runId));
   // Re-evaluate the checkout captured by the run, not whichever cwd the new Pi session happens to use.
   const fingerprint = await currentFingerprint(record.snapshot.cwd, { git: input.git, settings, base: record.snapshot.base ?? undefined, scope: record.snapshot.scope, filesystemTarget: Boolean(record.snapshot.targetPaths), targetPaths: record.snapshot.targetPaths });
-  const stale = fingerprint !== record.snapshot.fingerprint || ticketStale(record.contract, input.intent.ticket?.fingerprint);
+  const stale = fingerprint !== record.snapshot.fingerprint || await selectedTicketStale(record.contract, record.snapshot.cwd);
   if (stale) {
     const next = {
       ...record,
@@ -138,8 +138,21 @@ export async function evaluateExisting(runId: string, input: Omit<OrchestrateInp
 
 export { formatReport };
 
+const selectedTicketStale = async (contract: EvaluationContract, cwd: string): Promise<boolean> => {
+  if (!contract.ticketRef || !contract.ticketFingerprint) return false;
+  if (!/^docs\/tickets\/[a-zA-Z0-9][\w.-]*\.md$/.test(contract.ticketRef)) return true;
+  const text = await readFile(join(cwd, contract.ticketRef), 'utf8').catch(() => undefined);
+  return text === undefined || ticketStale(contract, fingerprintText(text));
+};
+
 const buildContract = (pending: unknown, intent: IntentContext, captured: CapturedSnapshot): { contract: EvaluationContract; problems: string[] } => {
   if (pending) {
+    if (checkContract(pending) && pending.ticketRef && pending.ticketRef !== intent.ticket?.ref) {
+      return {
+        contract: deriveContract(intent, captured.snapshot.paths.map(path => path.path), intent.userRequest?.english ?? intent.userRequest?.text),
+        problems: ['Pending contract references a different ticket and was ignored.'],
+      };
+    }
     const sanitized = sanitizeContract(pending, intent);
     if (sanitized.contract.items.length) return sanitized;
     return { contract: deriveContract(intent, captured.snapshot.paths.map(path => path.path), intent.userRequest?.english ?? intent.userRequest?.text), problems: sanitized.problems };
@@ -253,7 +266,7 @@ const finish = async (args: {
 export { readLatest };
 
 const environmentBriefing = (intent: IntentContext, workspaceNotes: string[]): string => [
-  intent.memory ? `Project memory (${intent.memory.ref}):\n${intent.memory.text}` : '',
+  !intent.userRequest && intent.memory ? `Project memory (${intent.memory.ref}):\n${intent.memory.text}` : '',
   intent.plan ? `Current plan (${intent.plan.ref}):\n${intent.plan.text}` : '',
   intent.ticket ? `Ticket (${intent.ticket.ref}):\n${intent.ticket.text}` : '',
   workspaceNotes.length ? `Workspace preparation:\n${workspaceNotes.join('\n')}` : '',

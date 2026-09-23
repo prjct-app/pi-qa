@@ -7,6 +7,8 @@ import type { ChangedPath, Snapshot } from './schema.ts';
 import type { QaSettings } from './settings.ts';
 
 const LOCAL_BASES = ['main', 'master', 'develop'] as const;
+const EVIDENCE_PATHS = ['--', '.', ':(exclude).pi/ticket.md'] as const;
+const ambientTicket = (path: string): boolean => path === '.pi/ticket.md' || path.endsWith('/.pi/ticket.md');
 
 export type SnapshotBlobs = Map<string, Buffer>;
 
@@ -49,13 +51,13 @@ export async function captureSnapshot(cwd: string, options: {
     };
   }
   const range = dirty ? 'HEAD' : `${base.sha}...HEAD`;
-  const nameStatus = parseNameStatus(splitZ((await run(cwd, ['diff', '-z', '--name-status', '-M', range])).stdout));
-  const untracked = splitZ((await run(cwd, ['ls-files', '-z', '--others', '--exclude-standard'])).stdout);
-  const stagedPatch = (await run(cwd, ['diff', '--cached', '--binary', '--no-ext-diff', '-M'])).stdout;
-  const unstagedPatch = (await run(cwd, ['diff', '--binary', '--no-ext-diff', '-M'])).stdout;
+  const nameStatus = parseNameStatus(splitZ((await run(cwd, ['diff', '-z', '--name-status', '-M', range, ...EVIDENCE_PATHS])).stdout));
+  const untracked = splitZ((await run(cwd, ['ls-files', '-z', '--others', '--exclude-standard'])).stdout).filter(path => !ambientTicket(path));
+  const stagedPatch = (await run(cwd, ['diff', '--cached', '--binary', '--no-ext-diff', '-M', ...EVIDENCE_PATHS])).stdout;
+  const unstagedPatch = (await run(cwd, ['diff', '--binary', '--no-ext-diff', '-M', ...EVIDENCE_PATHS])).stdout;
   const combinedPatch = dirty
-    ? (await run(cwd, ['diff', 'HEAD', '--binary', '--no-ext-diff', '-M'])).stdout
-    : (await run(cwd, ['diff', '--binary', '--no-ext-diff', '-M', `${base.sha}...HEAD`])).stdout;
+    ? (await run(cwd, ['diff', 'HEAD', '--binary', '--no-ext-diff', '-M', ...EVIDENCE_PATHS])).stdout
+    : (await run(cwd, ['diff', '--binary', '--no-ext-diff', '-M', `${base.sha}...HEAD`, ...EVIDENCE_PATHS])).stdout;
   const modes = await stagedModes(cwd, run);
   const blobs: SnapshotBlobs = new Map();
   const changed = await Promise.all(nameStatus.map(entry => describePath(cwd, entry, modes, blobs, options.settings)));
@@ -114,7 +116,7 @@ const trim = (result: { stdout: string; code: number }): { value: string | null 
   ({ value: result.code === 0 && result.stdout.trim() ? result.stdout.trim() : null });
 
 const isDirty = async (cwd: string, run: GitExec): Promise<boolean> => {
-  const status = await run(cwd, ['status', '--porcelain=v1', '-uall']);
+  const status = await run(cwd, ['status', '--porcelain=v1', '-uall', ...EVIDENCE_PATHS]);
   return status.stdout.trim().length > 0;
 };
 
@@ -195,7 +197,7 @@ const captureFilesystemTarget = async (cwd: string, runId: string, capturedAt: s
   if (normalizedRoots.length !== roots.length) {
     return { snapshot: unresolved(runId, capturedAt, cwd, 'Explicit target escapes its capture root.', null, null, 'target'), blobs: new Map() };
   }
-  const files = [...new Set((await Promise.all(normalizedRoots.map(root => walkTarget(cwd, root)))).flat())].sort();
+  const files = [...new Set((await Promise.all(normalizedRoots.map(root => walkTarget(cwd, root)))).flat())].filter(path => !ambientTicket(path)).sort();
   if (files.length > 10_000) {
     return { snapshot: unresolved(runId, capturedAt, cwd, `Explicit target has ${files.length} files; limit is 10000. Narrow --target.`, null, null, 'target'), blobs: new Map() };
   }
