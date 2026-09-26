@@ -16,10 +16,12 @@ for (const mode of ['tui', 'rpc'] as const) {
     await writeWorktree(dir, 'src.js', 'export const add = (a, b) => a - b;\n');
     const launched: string[] = [];
     const selectedModels: string[] = [];
+    const thinking: (string | undefined)[] = [];
     const model = (id: string, input: number) => ({ provider: 'qa-fixture', id, name: id, api: 'fixture', baseUrl: '', reasoning: true, input: ['text'], cost: { input, output: input, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_000 });
     const host = harness(dir, {
       mode,
       model: { provider: 'qa-fixture', id: 'frontier-max' },
+      thinkingLevel: 'high',
       availableModels: [model('frontier-max', 20), model('qa-mini', 1)],
       dependencies: {
         store: memoryStore('k'.repeat(20)),
@@ -30,6 +32,7 @@ for (const mode of ['tui', 'rpc'] as const) {
         runner: async input => {
           launched.push(input.role);
           selectedModels.push(input.model.id);
+          thinking.push(input.thinkingLevel);
           return fakeRunner({})(input);
         },
       },
@@ -37,7 +40,8 @@ for (const mode of ['tui', 'rpc'] as const) {
     try {
       await host.command('');
       assert.deepEqual(launched, ['tester']);
-      assert.deepEqual(selectedModels, ['qa-mini']);
+      assert.deepEqual(selectedModels, ['frontier-max'], 'QA runs on the session model, not the cheapest');
+      assert.deepEqual(thinking, ['high'], 'QA inherits the session thinking level');
       if (mode === 'tui') assert.equal(host.customCalls.length, 1);
       else assert.ok(host.notices.some(text => /NOT_VERIFIED|PASS|FAIL|STALE/.test(text)));
       await host.command('status');

@@ -5,7 +5,7 @@ import { markKeyRejected, resolveKey, type SecretStore } from './credentials.ts'
 import { evaluateEvidence } from './evaluate.ts';
 import { createJevClient, type JevFactory } from './jev.ts';
 import { formatReport } from './report.ts';
-import { sdkRunner, type QaRunner } from './runner.ts';
+import { sdkRunner, type QaRunner, type ThinkingLevel } from './runner.ts';
 import type { EvaluationContract, QaRunRecord, ReviewerReport, TesterReport } from './schema.ts';
 import { checkContract, emptyReviewer, emptyTester } from './schema.ts';
 import { captureSnapshot, currentFingerprint, type CapturedSnapshot } from './snapshot.ts';
@@ -25,6 +25,7 @@ export type OrchestrateInput = {
   pendingContract?: unknown;
   base?: string;
   model: { provider: string; id: string };
+  thinkingLevel?: ThinkingLevel;
   agentDir?: string;
   store: SecretStore;
   settings?: QaSettings;
@@ -76,7 +77,7 @@ export async function runQa(input: OrchestrateInput): Promise<QaRunRecord> {
     input.onProgress?.({ kind: 'agent', role: 'tester', status: 'running' });
     const qaPromise = (input.runner ?? sdkRunner)({
       role: 'tester', snapshot: captured.snapshot, contract, workspace: qaWorkspace.path,
-      artifactsDir: join(runDir, 'artifacts', 'browser'), model: input.model, agentDir: input.agentDir,
+      artifactsDir: join(runDir, 'artifacts', 'browser'), model: input.model, thinkingLevel: input.thinkingLevel, agentDir: input.agentDir,
       timeoutMs: settings.timeoutMs, signal: controller.signal, settings, extensionPaths: input.extensionPaths,
       briefing: environmentBriefing(input.intent, qaWorkspace.notes),
       onProgress: message => input.onProgress?.({ kind: 'stage', stage: 'agents', message }),

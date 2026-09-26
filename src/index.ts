@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { Container, Text } from '@earendil-works/pi-tui';
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent';
 import type { IntentContext } from './contract.ts';
-import { SYMBOL, brand, cheapComplete, completer, openPanel, openSecretPrompt, row, toEnglishInstructions, type Complete, type PanelAction } from '@prjct.app/pi-tui-kit';
+import { SYMBOL, brand, completer, sessionComplete, openPanel, openSecretPrompt, row, toEnglishInstructions, type Complete, type PanelAction } from '@prjct.app/pi-tui-kit';
 import { COMMAND, CONTRACT_TOOL, CUSTOM_RUN, CUSTOM_STATUS, EvaluationContractSchema, type QaRunRecord } from './schema.ts';
 import { loadIntent } from './context.ts';
 import { keyHasValidShape, keyringStore, resolveKey, saveKey, type SecretStore } from './credentials.ts';
@@ -33,7 +33,7 @@ export type QaDependencies = {
   extensionPaths?: string[];
   env?: NodeJS.ProcessEnv;
   selfTarget?: string;
-  /** Rewrites a non-English mission for the QA agents. Defaults to the cheapest reachable model. */
+  /** Rewrites a non-English mission for the QA agents. Defaults to the session's own model. */
   complete?: Complete;
 };
 
@@ -66,7 +66,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
    * are not; the originals stay as the verbatim source provenance is checked against.
    */
   const inEnglish = async (intent: IntentContext, ctx: ExtensionContext): Promise<IntentContext> => {
-    const complete = deps.complete ?? cheapComplete(ctx);
+    const complete = deps.complete ?? sessionComplete(ctx);
     const [english, englishItems] = await Promise.all([
       intent.userRequest ? toEnglishInstructions(intent.userRequest.text, complete) : undefined,
       intent.plan ? Promise.all(intent.plan.items.map(item => toEnglishInstructions(item, complete))) : undefined,
@@ -329,6 +329,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
         pendingContract: get().pendingContract,
         base,
         model,
+        thinkingLevel: ctx.thinkingLevel ?? pi.getThinkingLevel?.(),
         agentDir: agentHome(),
         store,
         settings,

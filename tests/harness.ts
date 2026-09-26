@@ -9,6 +9,7 @@ export function harness(root: string, options: {
   mode?: 'tui' | 'rpc' | 'print' | 'json';
   dependencies?: QaDependencies;
   model?: { provider: string; id: string };
+  thinkingLevel?: string;
   availableModels?: Array<Record<string, unknown> & { provider: string; id: string }>;
   systemPrompt?: string;
 } = {}) {
@@ -25,6 +26,7 @@ export function harness(root: string, options: {
     hasUI: !['print', 'json'].includes(options.mode ?? 'tui'),
     isProjectTrusted: () => true,
     model: options.model ?? { provider: 'qa-fixture', id: 'offline' },
+    thinkingLevel: options.thinkingLevel,
     modelRegistry: { getAvailable: () => options.availableModels ?? [] },
     scopedModels: [],
     sessionManager,

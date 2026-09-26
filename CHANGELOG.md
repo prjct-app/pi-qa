@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- QA runs on the session's model and thinking level instead of the smallest available model with thinking off. `qaModel` still overrides the model.
+- A non-English mission is rewritten by the session's own model, not the cheapest reachable one.
+
 ## 0.7.3
 
 - Fix isolated workspaces breaking every `node_modules/.bin` tool (vite, eslint, tsc…): links inside a dependency tree are now kept as relative links instead of being copied as files, so a tool finds its own files. pnpm stores inside `node_modules` keep their layout too. Links that leave the tree are still copied, never linked back to the checkout.
