@@ -105,7 +105,7 @@ Panel shortcut `p` copies a compact agent handoff containing only FAIL/BLOCKED c
 
 ```json
 {
-  "qaModel": "provider/optional-small-model",
+  "qaModel": "provider/model-id",
   "jevModel": "jev-1.13.0",
   "confidenceThreshold": 0.8,
   "noulThreshold": 0.8,
@@ -114,7 +114,7 @@ Panel shortcut `p` copies a compact agent handoff containing only FAIL/BLOCKED c
 }
 ```
 
-`qaModel` is optional. Without it, QA chooses the smallest model from Pi's client-scoped available list. No secrets belong in this file.
+`qaModel` is optional. Without it, QA runs on the model and thinking level of the session that started it. No secrets belong in this file.
 
 ## Limitations
 

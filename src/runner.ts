@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createAgentSession, createBashTool, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { createAgentSession, createBashTool, DefaultResourceLoader, SessionManager, SettingsManager, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import {
   AGENT_ROLES,
   checkReviewerReport,
@@ -21,6 +21,8 @@ import { agentHome, type QaSettings } from './settings.ts';
 import { clip, plain, sha256Hex } from './text.ts';
 import { createQaBrowser } from './browser.ts';
 
+export type ThinkingLevel = NonNullable<ExtensionContext['thinkingLevel']>;
+
 export type RunnerInput = {
   role: AgentRole;
   snapshot: Snapshot;
@@ -28,6 +30,8 @@ export type RunnerInput = {
   workspace: string;
   artifactsDir: string;
   model: { provider: string; id: string };
+  /** The parent session's thinking level; QA is judgement work and never runs without reasoning. */
+  thinkingLevel?: ThinkingLevel;
   agentDir?: string;
   timeoutMs: number;
   signal: AbortSignal;
@@ -67,7 +71,7 @@ export const sdkRunner: QaRunner = async input => {
   const { session } = await createAgentSession({
     cwd: input.workspace,
     agentDir: input.agentDir ?? agentHome(),
-    thinkingLevel: 'off',
+    thinkingLevel: input.thinkingLevel ?? 'medium',
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(input.workspace),
     settingsManager: settings,
