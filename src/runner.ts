@@ -49,7 +49,7 @@ const READ_ONLY = ['read', 'grep', 'find', 'ls'] as const;
 export const sdkRunner: QaRunner = async input => {
   const started = Date.now();
   const reportSlot: { report?: unknown; error?: string } = {};
-  const browser = input.role === 'tester' ? createQaBrowser(input.artifactsDir) : undefined;
+  const browser = input.role === 'tester' ? createQaBrowser(input.artifactsDir, { cwd: input.workspace }) : undefined;
   const bashReceipts: ExecutionReceipt[] = [];
   const bash = input.role === 'tester' ? auditedBash(input.workspace, bashReceipts) : undefined;
   const settings = SettingsManager.inMemory();
@@ -149,6 +149,8 @@ const toolActivity = (toolName: string, args: Record<string, unknown>): string =
   if (toolName === TESTER_REPORT_TOOL) return 'Finalizing test cases…';
   if (toolName === 'bash') return `Running command: ${redact(clip(plain(args.command ?? ''), 140))}`;
   if (toolName === 'read') return `Reading ${clip(plain(args.path ?? 'file'), 120)}…`;
+  if (toolName === 'qa_browser' && args.action === 'call_tool') return `WebMCP: ${clip(plain(args.name ?? 'tool'), 60)}…`;
+  if (toolName === 'qa_browser' && typeof args.action === 'string' && args.action.startsWith('app_')) return `MCP App: ${clip(plain(args.action === 'app_open' ? args.name ?? 'tool' : args.action.slice(4)), 60)}…`;
   if (toolName === 'qa_browser') return `Browser: ${clip(plain(args.action ?? 'interaction'), 60)}…`;
   return `Using ${toolName}…`;
 };

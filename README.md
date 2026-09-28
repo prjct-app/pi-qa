@@ -64,6 +64,27 @@ Expected behavior comes from the user, ticket, spec, or existing tests. A defaul
 
 Host wrappers around `bash` and `qa_browser` issue immutable execution receipts. Agent-written output without a matching receipt is not evidence. Playwright can capture DOM text, screenshots, hashes, and traces.
 
+### WebMCP
+
+`qa_browser` launches Chrome with WebMCP on (`--enable-features=WebMCPTesting`, Chrome 149+; the Playwright Chromium qualifies). When the page under test registers [WebMCP](https://webmachinelearning.github.io/webmcp/) tools on `document.modelContext`, the QA agent can use them next to clicks:
+
+- `tools` lists the tools the open page registers (name, description, input schema, annotations such as `readOnly` or `consequential`) and saves that manifest as a hashed artifact.
+- `call_tool` runs one tool by `name` with `input` as JSON object text. It reports the tool's output, whether it threw, how the input compares to the tool's schema, whether the page text changed, and the page afterwards.
+
+The agent drives state through tools but confirms every effect in the page text or a screenshot, never from tool output alone. It also tests the tools: registration, descriptions and schemas, the happy path, missing or mistyped input (Chrome does not validate inputs against the schema, so the page must), and read-only tools leaving the page unchanged. A tool that throws is an observation with a completed receipt, so negative cases have evidence; a tool the page never registered fails the call. Chrome reports a throwing tool as `UnknownError: Tool was executed but the invocation failed`, without the page's own message. Pages without WebMCP tools are tested with open, click, fill and press as before.
+
+### MCP Apps
+
+`qa_browser` is also a test host for [MCP Apps](https://github.com/modelcontextprotocol/ext-apps) (the MCP UI extension, formerly MCP-UI): servers whose tools declare a `ui://` resource that Claude, ChatGPT and other hosts render as an interactive view.
+
+- `app_connect` starts a stdio MCP server (`command` and `args`, run in the QA workspace) or connects to a streamable HTTP `url`. The client advertises the `io.modelcontextprotocol/ui` extension.
+- `app_tools` lists the server's tools with their `ui://` resource and visibility, and saves the list as a hashed artifact.
+- `app_open` calls a tool by `name` with `input`, reads its UI resource, and renders it in a sandboxed iframe (`allow-scripts allow-forms`) with the CSP a spec-following host derives from the resource's `_meta.ui.csp`. The official `AppBridge` runs in Node: it completes `ui/initialize`, sends the tool input and result, and relays the app's `tools/call` and resource reads to the server. The served HTML is saved as evidence.
+- After `app_open`, `click`, `fill`, `press`, `snapshot` and `screenshot` act inside the app until the next `open` or `app_open`.
+- `app_log` shows every message between app and host, chat messages, link and display-mode requests, model-context updates, CSP violations, console errors, and the server's stderr.
+
+A missing handshake within 10 seconds, a tool without a UI, or an unknown tool fails the call.
+
 The QA session reuses the current Pi model authentication. No extra model API key is needed.
 
 ## Jev
