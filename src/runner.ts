@@ -45,6 +45,19 @@ export type QaRunner = (input: RunnerInput) => Promise<AgentOutcome>;
 
 const READ_ONLY = ['read', 'grep', 'find', 'ls'] as const;
 
+/**
+ * Build the active tool allowlist passed to `createAgentSession` for a role.
+ * The browser tool is only added when the runner actually has a browser instance;
+ * the reviewer never gets it. Centralising the decision here keeps the active
+ * list and the `customTools` registration in sync.
+ */
+export const buildActiveTools = (role: AgentRole, hasBrowser: boolean): string[] => {
+  if (role === 'reviewer') return [...READ_ONLY, REVIEWER_REPORT_TOOL];
+  const testerTools = [...READ_ONLY, 'bash', TESTER_REPORT_TOOL];
+  if (hasBrowser) testerTools.push('qa_browser');
+  return testerTools;
+};
+
 /** Dedicated in-process Pi SDK runner. Does not use pi-subagents agent_delegate. */
 export const sdkRunner: QaRunner = async input => {
   const started = Date.now();
@@ -75,9 +88,7 @@ export const sdkRunner: QaRunner = async input => {
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(input.workspace),
     settingsManager: settings,
-    tools: input.role === 'reviewer'
-      ? [...READ_ONLY, REVIEWER_REPORT_TOOL]
-      : [...READ_ONLY, 'bash', TESTER_REPORT_TOOL],
+    tools: buildActiveTools(input.role, browser !== undefined),
     customTools: [reportTool(input.role, reportSlot), ...(bash ? [bash] : []), ...(browser ? [browser.tool] : [])],
   });
   const unsubscribe = session.subscribe(event => {
