@@ -2,17 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { brand, completer, openPanel } from '@prjct.app/pi-tui-kit';
+import { brand, completer, openPanel, repairToolArgs, schemaForModel } from '@prjct.app/pi-tui-kit';
 import { COMMAND, CONTRACT_TOOL, CUSTOM_RUN, CUSTOM_STATUS, EvaluationContractSchema, type QaRunRecord } from './schema.ts';
-import { loadIntent } from './context.ts';
 import { keyringStore, resolveKey, type SecretStore } from './credentials.ts';
-import { evaluateExisting, readLatest, runQa } from './orchestrate.ts';
 import { formatReport } from './report.ts';
-import { createJevClient, type JevFactory } from './jev.ts';
+import type { JevFactory } from './jev.ts';
 import type { QaRunner } from './runner.ts';
 import type { GitExec } from './git.ts';
 import { agentHome, loadSettings, prjctHome, type QaSettings } from './settings.ts';
-import { configureEvaluator } from './command-setup.ts';
 import { checkContract } from './schema.ts';
 import { clip, plain } from './text.ts';
 import { qaLivePanelSpec } from './panel.ts';
@@ -52,7 +49,11 @@ const ACTIONS = [
 
 const OUTPUT_LIMIT = 16_384;
 
+/** Loaded on first /qa: see engine.ts. */
+const engine = () => import('./engine.ts');
+
 export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
+  repairToolArgs(pi, { pi_qa_tester_report: { truncate: true }, pi_qa_reviewer_report: { truncate: true } });
   const slot: { current: State } = { current: { closed: false } };
   const serialSlot: { serial: Promise<unknown> } = { serial: Promise.resolve() };
   const ctxSlot: { command?: ExtensionContext } = {};
@@ -76,9 +77,12 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
 
   registerQaRenderers(pi);
 
-  const configureGlobalEvaluator = async (ctx: ExtensionCommandContext): Promise<boolean> => configureEvaluator(ctx, {
-    store: await secrets(), settings: deps.settings ?? loadSettings(), jevFactory: deps.jevFactory ?? createJevClient, output,
-  });
+  const configureGlobalEvaluator = async (ctx: ExtensionCommandContext): Promise<boolean> => {
+    const { configureEvaluator, createJevClient } = await engine();
+    return configureEvaluator(ctx, {
+      store: await secrets(), settings: deps.settings ?? loadSettings(), jevFactory: deps.jevFactory ?? createJevClient, output,
+    });
+  };
 
   const present = (ctx: ExtensionCommandContext, record: QaRunRecord): void => presentRecord(ctx, record, output);
 
@@ -137,7 +141,8 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     label: 'QA contract',
     description: 'Submit a dynamic evaluation contract for the next /qa run. Inferred items must use source inferred_from_diff; do not relabel them as user requirements. '
       + `Write description, text and observe in plain, simple English, even when the person wrote in another language; sourceText stays a verbatim quote.`,
-    parameters: EvaluationContractSchema,
+    // Limits stay out of what the model reads; checkContract validates the full schema below.
+    parameters: schemaForModel(EvaluationContractSchema),
     execute: async (_id, params) => {
       if (!checkContract(params)) {
         return { content: [{ type: 'text' as const, text: 'Contract rejected: schema validation failed.' }], details: {} };
@@ -208,6 +213,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     }
     ctx.ui.setStatus?.('qa', request ? 'capturing QA target…' : 'capturing snapshot…');
     try {
+      const { loadIntent, runQa, createJevClient } = await engine();
       const context = await loadIntent(ctx, runCwd, targetMission);
       const intent = targetMission ? { ...context, userRequest: { text: targetMission, ref: 'command:/qa' } } : context;
       live.state.mission = intent.userRequest?.english ?? intent.userRequest?.text ?? 'Inspect the available target and identify what cannot be established.';
@@ -264,6 +270,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
         return;
       }
     }
+    const { readLatest, evaluateExisting, createJevClient } = await engine();
     const id = runId ?? get().lastRunId ?? await readLatest(deps.home ?? prjctHome());
     if (!id) {
       output('No captured snapshot. Starting a fresh QA run.');
