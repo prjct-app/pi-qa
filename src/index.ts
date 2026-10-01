@@ -1,27 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { lstat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { Container, Text } from '@earendil-works/pi-tui';
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent';
-import type { IntentContext } from './contract.ts';
-import { SYMBOL, brand, completer, sessionComplete, openPanel, openSecretPrompt, row, toEnglishInstructions, type Complete, type PanelAction } from '@prjct.app/pi-tui-kit';
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { brand, completer, openPanel } from '@prjct.app/pi-tui-kit';
 import { COMMAND, CONTRACT_TOOL, CUSTOM_RUN, CUSTOM_STATUS, EvaluationContractSchema, type QaRunRecord } from './schema.ts';
 import { loadIntent } from './context.ts';
-import { keyHasValidShape, keyringStore, resolveKey, saveKey, type SecretStore } from './credentials.ts';
+import { keyringStore, resolveKey, type SecretStore } from './credentials.ts';
 import { evaluateExisting, readLatest, runQa } from './orchestrate.ts';
-import { boundedReport, formatReport } from './report.ts';
+import { formatReport } from './report.ts';
 import { createJevClient, type JevFactory } from './jev.ts';
 import type { QaRunner } from './runner.ts';
 import type { GitExec } from './git.ts';
 import { agentHome, loadSettings, prjctHome, type QaSettings } from './settings.ts';
-import { verifyEvaluatorKey } from './setup.ts';
+import { configureEvaluator } from './command-setup.ts';
 import { checkContract } from './schema.ts';
 import { clip, plain } from './text.ts';
-import { qaLivePanelSpec, qaPanelSpec } from './panel.ts';
+import { qaLivePanelSpec } from './panel.ts';
 import { createQaLiveModel, type QaLiveModel } from './progress.ts';
 import { selectQaModel } from './model.ts';
-import { copyToClipboard, openArtifactDirectory, qaPrompt, writeArtifacts } from './export.ts';
+import { panelActions, present as presentRecord, registerQaRenderers } from './command-ui.ts';
+import { parseArgs, refersToThisExtension, findSelfTarget } from './command-target.ts';
 
 export type QaDependencies = {
   store?: SecretStore;
@@ -33,8 +31,6 @@ export type QaDependencies = {
   extensionPaths?: string[];
   env?: NodeJS.ProcessEnv;
   selfTarget?: string;
-  /** Rewrites a non-English mission for the QA agents. Defaults to the session's own model. */
-  complete?: Complete;
 };
 
 type State = {
@@ -61,22 +57,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
   const serialSlot: { serial: Promise<unknown> } = { serial: Promise.resolve() };
   const ctxSlot: { command?: ExtensionContext } = {};
   const get = () => slot.current;
-  /**
-   * QA agents read English. The mission and plan items are rewritten when they
-   * are not; the originals stay as the verbatim source provenance is checked against.
-   */
-  const inEnglish = async (intent: IntentContext, ctx: ExtensionContext): Promise<IntentContext> => {
-    const complete = deps.complete ?? sessionComplete(ctx);
-    const [english, englishItems] = await Promise.all([
-      intent.userRequest ? toEnglishInstructions(intent.userRequest.text, complete) : undefined,
-      intent.plan ? Promise.all(intent.plan.items.map(item => toEnglishInstructions(item, complete))) : undefined,
-    ]);
-    return {
-      ...intent,
-      ...(intent.userRequest ? { userRequest: { ...intent.userRequest, english } } : {}),
-      ...(intent.plan ? { plan: { ...intent.plan, englishItems } } : {}),
-    };
-  };
   const set = (update: Partial<State>) => { slot.current = { ...get(), ...update }; };
 
   /** Serialized like pi-team commands: handlers never interleave. */
@@ -94,105 +74,13 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     else pi.sendMessage({ customType: CUSTOM_STATUS, content: safe, display: true }, { triggerTurn: false, deliverAs: 'nextTurn' });
   };
 
-  pi.registerMessageRenderer?.(CUSTOM_STATUS, (message: unknown, _expanded: unknown, theme: Theme) => {
-    const text = String((message as { content?: string }).content ?? '');
-    const container = new Container();
-    container.addChild(row(theme, { symbol: text.includes('FAIL') ? SYMBOL.error : SYMBOL.ok, tone: text.includes('FAIL') ? 'error' : 'accent', verb: 'QA', target: 'status', meta: text.split('\n')[0] ?? '' }));
-    container.addChild(new Text(theme.fg('dim', text), 2, 0));
-    return container;
+  registerQaRenderers(pi);
+
+  const configureGlobalEvaluator = async (ctx: ExtensionCommandContext): Promise<boolean> => configureEvaluator(ctx, {
+    store: await secrets(), settings: deps.settings ?? loadSettings(), jevFactory: deps.jevFactory ?? createJevClient, output,
   });
 
-  pi.registerMessageRenderer?.(CUSTOM_RUN, (message: unknown, _expanded: unknown, theme: Theme) => {
-    const data = message as { content?: { runId?: string; verdict?: string; fingerprint?: string; kind?: string; description?: string } };
-    const container = new Container();
-    const line = data.content?.kind === 'contract'
-      ? `contract stored: ${data.content.description ?? ''}`
-      : `${data.content?.verdict ?? ''}  run ${data.content?.runId ?? ''}  snapshot ${data.content?.fingerprint?.slice(0, 12) ?? ''}`;
-    container.addChild(row(theme, { symbol: data.content?.verdict === 'FAIL' ? SYMBOL.error : SYMBOL.ok, tone: data.content?.verdict === 'FAIL' ? 'error' : 'accent', verb: 'QA', target: data.content?.kind === 'contract' ? 'contract' : 'run', meta: line }));
-    return container;
-  });
-
-  const configureGlobalEvaluator = async (ctx: ExtensionCommandContext): Promise<boolean> => {
-    if (ctx.mode !== 'tui' || !ctx.hasUI) {
-      output('Set TYPESAFE_API_KEY for RPC/print mode, or run /qa setup in TUI.', 'error');
-      return false;
-    }
-    const store = await secrets();
-    const settings = deps.settings ?? loadSettings();
-    const key = await openSecretPrompt(ctx, {
-      title: 'Global evaluator key',
-      message: 'Stored once in the OS keyring for every project.',
-      label: 'key',
-      placeholder: 'paste TypeSafe key',
-      validate: async value => {
-        if (!keyHasValidShape(value)) return 'That value is not a valid TypeSafe API key.';
-        ctx.ui.setStatus?.('qa', 'Validating global evaluator…');
-        try {
-          const error = await verifyEvaluatorKey(value, settings, deps.jevFactory ?? createJevClient);
-          if (error) return error;
-          await saveKey(store, value, true);
-          return undefined;
-        } finally {
-          ctx.ui.setStatus?.('qa', undefined);
-        }
-      },
-    });
-    return Boolean(key);
-  };
-
-  const panelActions = (ctx: ExtensionCommandContext, live: QaLiveModel, controller: AbortController): PanelAction[] => [
-    {
-      key: 'x', label: 'cancel run', when: () => !live.state.record,
-      run: async (_item, panel) => { controller.abort(); panel.notice('Cancel requested. Preserving partial evidence.', 'warning'); },
-    },
-    {
-      key: 'e', label: 'export artifacts', when: () => Boolean(live.state.record), confirm: true,
-      run: async (_item, panel) => {
-        const record = live.state.record!;
-        const destination = join(record.snapshot.cwd, 'qa-results', record.runId);
-        const exported = await writeArtifacts(record, destination);
-        panel.notice(`Exported ${exported.files.length} files to ${exported.directory}`, 'success');
-      },
-    },
-    {
-      key: 'p', label: 'copy non-passing', when: () => Boolean(live.state.record),
-      run: async (_item, panel) => {
-        const prompt = qaPrompt(live.state.record!);
-        await copyToClipboard(prompt);
-        panel.notice(`Copied ${prompt.length.toLocaleString()} characters to clipboard.`, 'success');
-      },
-    },
-    {
-      key: 'o', label: 'open artifacts', when: () => Boolean(live.state.record?.exports?.directory),
-      run: async (_item, panel) => {
-        const directory = live.state.record!.exports!.directory;
-        await openArtifactDirectory(directory);
-        panel.notice(`Opened ${directory}`, 'success');
-      },
-    },
-    {
-      key: 'r', label: 'run again', when: () => Boolean(live.state.record),
-      run: async (_item, panel) => {
-        const record = live.state.record!;
-        const mission = record.contract.items.find(item => item.source === 'user_request')?.sourceText
-          ?? record.contract.items.find(item => item.source === 'user_request')?.text
-          ?? record.contract.description;
-        panel.close();
-        ctx.ui.setEditorText(`/qa ${mission}`);
-      },
-    },
-  ];
-
-  const present = (ctx: ExtensionCommandContext, record: Awaited<ReturnType<typeof runQa>>): void => {
-    if (ctx.mode === 'tui' && ctx.hasUI) {
-      const live = createQaLiveModel(record.runId, record.contract.description);
-      live.update({ kind: 'complete', record });
-      const actions = panelActions(ctx, live, new AbortController());
-      void openPanel(ctx, qaLivePanelSpec(live, actions)).catch(error => output(error instanceof Error ? error.message : String(error), 'error'));
-      return;
-    }
-    output(boundedReport(record));
-  };
+  const present = (ctx: ExtensionCommandContext, record: QaRunRecord): void => presentRecord(ctx, record, output);
 
   const secrets = async (): Promise<SecretStore> => {
     if (deps.store) return deps.store;
@@ -321,7 +209,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     ctx.ui.setStatus?.('qa', request ? 'capturing QA target…' : 'capturing snapshot…');
     try {
       const context = await loadIntent(ctx, runCwd, targetMission);
-      const intent = await inEnglish(targetMission ? { ...context, userRequest: { text: targetMission, ref: 'command:/qa' } } : context, ctx);
+      const intent = targetMission ? { ...context, userRequest: { text: targetMission, ref: 'command:/qa' } } : context;
       live.state.mission = intent.userRequest?.english ?? intent.userRequest?.text ?? 'Inspect the available target and identify what cannot be established.';
       const record = await runQa({
         cwd: runCwd,
@@ -385,7 +273,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     const record = await evaluateExisting(id, {
       cwd: ctx.cwd,
       intent: {},
-      model: parentModel(ctx) ?? { provider: 'none', id: 'none' },
+      model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : { provider: 'none', id: 'none' },
       store,
       settings: deps.settings ?? loadSettings(),
       jevFactory: deps.jevFactory ?? createJevClient,
@@ -401,49 +289,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
 }
 
 export default (pi: ExtensionAPI): void => installQa(pi);
-
-const parentModel = (ctx: ExtensionContext): { provider: string; id: string } | undefined => {
-  const model = ctx.model;
-  if (!model) return undefined;
-  return { provider: model.provider, id: model.id };
-};
-
-type ParsedArgs = { action: 'run' | 'status' | 'cancel' | 'setup' | 'evaluate'; base?: string; target?: string; runId?: string; request?: string };
-
-const parseArgs = (args: string): ParsedArgs => {
-  const tokens = (args.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map(token => token.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2')).filter(Boolean);
-  const exact = tokens.join(' ');
-  if (exact === 'status' || exact === 'cancel' || exact === 'setup') return { action: exact };
-  if (tokens[0] === 'evaluate' && (tokens.length === 1 || (tokens.length === 2 && UUID.test(tokens[1] ?? '')))) {
-    return { action: 'evaluate', runId: tokens[1] };
-  }
-  const collected = tokens.reduce<{ values: string[]; base?: string; target?: string; skip: boolean }>((acc, token, index, all) => {
-    if (acc.skip) return { ...acc, skip: false };
-    if (token === '--base' && all[index + 1]) return { ...acc, base: all[index + 1], skip: true };
-    if (token === '--target' && all[index + 1]) return { ...acc, target: all[index + 1], skip: true };
-    return { ...acc, values: [...acc.values, token] };
-  }, { values: [], skip: false });
-  const values = collected.values[0] === 'run' ? collected.values.slice(1) : collected.values;
-  return { action: 'run', base: collected.base, target: collected.target, request: values.join(' ').trim() || undefined };
-};
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-const refersToThisExtension = (request: string): boolean => /(?:\bpi-qa\b|\b(?:esta|this|la)\s+extensi[oó]n\b|\bextension\b|\bextensi[oó]n\b)/i.test(request);
-
-const findSelfTarget = async (cwd: string): Promise<string | undefined> => {
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const candidates = [...new Set([join(cwd, 'pi-qa'), cwd, dirname(moduleDir), moduleDir])];
-  const matched = await Promise.all(candidates.map(async candidate => {
-    try {
-      const manifest = JSON.parse(await readFile(join(candidate, 'package.json'), 'utf8')) as { name?: string; pi?: unknown };
-      return manifest.name === '@prjct.app/pi-qa' ? candidate : undefined;
-    } catch {
-      return undefined;
-    }
-  }));
-  return matched.find(Boolean);
-};
 
 const statusText = (state: State): string => {
   if (state.active) return `QA running (${state.active.runId}). /qa cancel to stop.`;

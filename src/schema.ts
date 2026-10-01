@@ -94,7 +94,10 @@ export const ReviewerReportSchema = Type.Object({
 }, { additionalProperties: false });
 export type ReviewerReport = Static<typeof ReviewerReportSchema>;
 
-const TestKindSchema = Type.Union(['smoke', 'unit', 'integration', 'e2e', 'api', 'ui', 'build', 'static', 'security', 'manual', 'other'].map(value => Type.Literal(value)));
+const TestKindSchema = Type.Union([
+  Type.Literal('smoke'), Type.Literal('unit'), Type.Literal('integration'), Type.Literal('e2e'), Type.Literal('api'), Type.Literal('ui'),
+  Type.Literal('build'), Type.Literal('static'), Type.Literal('security'), Type.Literal('manual'), Type.Literal('other'),
+]);
 export const QaArtifactSchema = Type.Object({
   kind: Type.Union([Type.Literal('screenshot'), Type.Literal('trace'), Type.Literal('log'), Type.Literal('file')]),
   path: Type.String({ minLength: 1, maxLength: 4096 }),
@@ -156,8 +159,11 @@ export type ChangedPath = {
   omittedReason?: string;
 };
 
+export type QaSurface = 'browser' | 'api' | 'command';
+
 export type Snapshot = {
   runId: string;
+  qaSurface?: QaSurface;
   scope?: 'change' | 'target';
   targetPaths?: string[];
   capturedAt: string;

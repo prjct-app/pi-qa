@@ -3,6 +3,7 @@ import { evaluateQaBatch, type JevClient, type JsonState, type QaBatchSubject } 
 import type { CriterionEvaluation, EvaluationContract, ExecutionReceipt, JevDecision, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
 import type { QaSettings } from './settings.ts';
 import { clip } from './text.ts';
+import { behavioralTest } from './behavior.ts';
 import type { SnapshotBlobs } from './snapshot.ts';
 
 export async function evaluateEvidence(input: {
@@ -36,7 +37,7 @@ export async function evaluateEvidence(input: {
     key: `criterion_${index}`,
     subjectId: item.id,
     question: 'criterion',
-    prompt: `Taken together, do the evaluated test cases support, contradict, or fail to establish required behavior ${item.id}?`,
+    prompt: `Do the executed black-box scenarios support, contradict, or fail to establish behavior ${item.id}? Code review, unit tests, lint and builds alone do not establish application behavior. For a web flow require browser observations; for an API require real endpoint requests and responses.`,
   }));
   const subjects = [...testSubjects, ...criterionSubjects];
   const state = batchState(input.contract, tests, input.executions, input.settings);
@@ -68,6 +69,7 @@ export async function evaluateEvidence(input: {
 
 const batchState = (contract: EvaluationContract, tests: TesterReport['tests'], executions: ExecutionReceipt[] | undefined, settings: QaSettings): JsonState => ({
   mission: contract.description,
+  qaRole: 'Behavioral QA, not code review. Developer checks are supporting evidence only. Require using the running application: browser journeys for web, real HTTP requests and regression scenarios for endpoints, public commands for CLI tooling. A tool output alone does not prove the claimed effect.',
   requirements: contract.items.map(item => ({ id: item.id, behavior: clip(item.text, settings.excerptChars), source: item.source, required: item.required, observe: clip(item.observe, settings.excerptChars) })),
   testCases: tests.map(test => ({
     id: test.id,
@@ -96,7 +98,7 @@ const criterionResult = (
   tests: TesterReport['tests'],
   decisions: JevDecision[],
 ): CriterionEvaluation => {
-  const linked = tests.filter(test => test.contractItemIds.includes(item.id));
+  const linked = tests.filter(test => behavioralTest(test) && test.contractItemIds.includes(item.id));
   const decision = decisions.find(value => value.question === 'criterion' && value.subjectId === item.id);
   const label = decision?.label === 'supports' || decision?.label === 'contradicts' || decision?.label === 'insufficient_evidence'
     ? decision.label
