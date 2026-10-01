@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { createAgentSession, createBashTool, DefaultResourceLoader, SessionManager, SettingsManager, type ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import {
   AGENT_ROLES,
   checkReviewerReport,
@@ -18,8 +17,9 @@ import {
 } from './schema.ts';
 import { reviewerParams, reviewerPrompt, testerParams, testerPrompt } from './agents.ts';
 import { agentHome, type QaSettings } from './settings.ts';
-import { clip, plain, sha256Hex } from './text.ts';
+import { clip, plain } from './text.ts';
 import { createQaBrowser } from './browser.ts';
+import { auditedBash } from './audited-bash.ts';
 
 export type ThinkingLevel = NonNullable<ExtensionContext['thinkingLevel']>;
 
@@ -44,6 +44,19 @@ export type RunnerInput = {
 export type QaRunner = (input: RunnerInput) => Promise<AgentOutcome>;
 
 const READ_ONLY = ['read', 'grep', 'find', 'ls'] as const;
+
+/**
+ * Build the active tool allowlist passed to `createAgentSession` for a role.
+ * The browser tool is only added when the runner actually has a browser instance;
+ * the reviewer never gets it. Centralising the decision here keeps the active
+ * list and the `customTools` registration in sync.
+ */
+export const buildActiveTools = (role: AgentRole, hasBrowser: boolean): string[] => {
+  if (role === 'reviewer') return [...READ_ONLY, REVIEWER_REPORT_TOOL];
+  const testerTools = [...READ_ONLY, 'bash', TESTER_REPORT_TOOL];
+  if (hasBrowser) testerTools.push('qa_browser');
+  return testerTools;
+};
 
 /** Dedicated in-process Pi SDK runner. Does not use pi-subagents agent_delegate. */
 export const sdkRunner: QaRunner = async input => {
@@ -75,9 +88,7 @@ export const sdkRunner: QaRunner = async input => {
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(input.workspace),
     settingsManager: settings,
-    tools: input.role === 'reviewer'
-      ? [...READ_ONLY, REVIEWER_REPORT_TOOL]
-      : [...READ_ONLY, 'bash', TESTER_REPORT_TOOL],
+    tools: buildActiveTools(input.role, browser !== undefined),
     customTools: [reportTool(input.role, reportSlot), ...(bash ? [bash] : []), ...(browser ? [browser.tool] : [])],
   });
   const unsubscribe = session.subscribe(event => {
@@ -156,43 +167,6 @@ const toolActivity = (toolName: string, args: Record<string, unknown>): string =
 };
 
 const redact = (value: string): string => value.replace(/((?:api[_-]?key|token|secret|password)\s*=\s*)\S+/gi, '$1[redacted]');
-
-const auditedBash = (cwd: string, receipts: ExecutionReceipt[]) => {
-  const base = createBashTool(cwd);
-  const execute: typeof base.execute = async (...args) => {
-    const [toolCallId, params, signal] = args;
-    const id = `bash-${toolCallId}-${randomUUID()}`;
-    const startedAt = new Date().toISOString();
-    try {
-      const result = await base.execute(...args);
-      const output = toolText(result.content);
-      receipts.push(receipt({ id, tool: 'bash', command: params.command, cwd, startedAt, status: 'completed', exitCode: 0, output }));
-      return { ...result, content: [...result.content, { type: 'text' as const, text: `QA execution receipt: ${id}` }] };
-    } catch (error) {
-      const output = error instanceof Error ? error.message : String(error);
-      const matched = /Command exited with code (-?\d+)/.exec(output);
-      receipts.push(receipt({ id, tool: 'bash', command: params.command, cwd, startedAt, status: signal?.aborted ? 'canceled' : 'failed', exitCode: matched ? Number(matched[1]) : null, output }));
-      throw new Error(`${output}\nQA execution receipt: ${id}`);
-    }
-  };
-  return { ...base, execute };
-};
-
-const receipt = (input: Omit<ExecutionReceipt, 'finishedAt' | 'outputHash' | 'outputExcerpt'> & { output: string }): ExecutionReceipt => ({
-  id: input.id,
-  tool: input.tool,
-  command: input.command,
-  cwd: input.cwd,
-  startedAt: input.startedAt,
-  finishedAt: new Date().toISOString(),
-  status: input.status,
-  exitCode: input.exitCode,
-  outputHash: sha256Hex(input.output),
-  outputExcerpt: clip(plain(input.output), 4_000),
-  artifactHashes: input.artifactHashes,
-});
-
-const toolText = (content: Array<{ type: string; text?: string }>): string => content.map(item => item.type === 'text' ? item.text ?? '' : '').join('\n');
 
 export const reportTool = (role: AgentRole, slot: { report?: unknown; error?: string }) => ({
   name: role === 'reviewer' ? REVIEWER_REPORT_TOOL : TESTER_REPORT_TOOL,

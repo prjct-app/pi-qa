@@ -48,17 +48,19 @@ QA never runs destructive git commands against your checkout. The QA agent uses 
 
 ## Contract
 
-Tickets are included only when the current request names a ticket number (for example, `/qa test ticket 07`) or an explicit `docs/tickets/<name>.md` path. The referenced file supplies acceptance criteria, DoR, and DoD. QA never reads `.pi/ticket.md` or copies it into a QA workspace; contracts and snapshots live under `~/.prjct/pi-qa/runs/<id>/`.
+Tickets resolve from an explicit ID or Markdown path, the active task exchange, or the current feature branch. `/qa PRJ-T315` finds matching documents under local or sibling `docs`, `project`, and `tickets` directories, including `docs/project/work/tasks`; legacy `ticket 07` references still work. Missing or ambiguous references block the run. The document supplies AC, DoR and DoD and is fingerprinted for staleness. Ambient `.pi/ticket.md` files and symbolic links are excluded.
 
 For local artifacts, use an explicit path: `/qa --target ./pi-qa smoke test this extension`. Dependencies, Git metadata, `.env*`, private keys, certificates, and prior QA exports are excluded from filesystem target capture.
 
-The command text becomes a required `user_request` criterion. Without command text, QA uses the latest conversational entry only when it is actually from the user; a plan is considered only when no current user request exists. It never searches backward for an unrelated old request or implicitly loads a project ticket. Every item is `user_request`, `ticket`, `plan`, or `inferred_from_diff`; inferred items never prove unstated intent. Sanitization problems remain in the run record.
+The command text becomes a required `user_request` criterion. Without it, QA retains the latest actual user request after assistant/tool messages. Generic testing follow-ups also consider the immediately preceding task exchange; older unrelated exchanges and tool results are ignored. Every item is `user_request`, `ticket`, `plan`, or `inferred_from_diff`; inferred items never prove unstated intent.
 
 The main model may submit a contract with the `pi_qa_contract` tool before `/qa`. Relabeled inferred items are reclassified.
 
 ## QA agent
 
-One isolated Pi session designs and executes the smallest relevant set of test cases. Every case records expected behavior, its source, procedure, observation, execution receipts, and artifacts. The agent receives captured changes and the explicitly selected ticket when available; other context is untrusted and must not override the requested task.
+One isolated Pi session performs behavioral QA, not code review. It exercises browser journeys for web applications, real endpoint requests and regression scenarios for backends, or the public interface of non-web products. Developer checks (unit tests, typecheck, lint and builds) are supplemental and cannot alone yield PASS. Missing runtime access is a blocker, not permission to substitute code inspection.
+
+Instructions and agent reports are in English. Source requests and ticket quotes remain verbatim; there is no separate translation-model call. QA tests the captured branch and worktree; base refs are comparison points, not merge targets. Every case records expected behavior, its source, procedure, observation, receipts and artifacts.
 
 Expected behavior comes from the user, ticket, spec, or existing tests. A default smoke expectation is limited to successful load/launch, no crash, and a responding primary command or endpoint. If none is defensible, the case is `BLOCKED`; QA does not invent PASS.
 

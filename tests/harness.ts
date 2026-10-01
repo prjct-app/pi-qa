@@ -49,7 +49,7 @@ export function harness(root: string, options: {
   } as unknown as ExtensionAPI;
   installQa(pi, options.dependencies);
   return {
-    tools, commands, notices, entries, customCalls,
+    tools, commands, notices, entries, customCalls, sessionManager,
     async emit(name: string) { for (const handler of handlers.get(name) ?? []) await handler({}, context); },
     async command(text: string) { return commands.get(COMMAND)!.handler(text, context); },
     async tool(name: string, params: unknown) { return tools.get(name)!.execute('test', params as never, undefined, undefined, context); },

@@ -1,4 +1,5 @@
 import type { AgentOutcome, CriterionEvaluation, DeterministicCheck, EvaluationContract, JevDecision, QaVerdict, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
+import { behaviorGap } from './behavior.ts';
 
 export type VerdictInput = {
   contract: EvaluationContract;
@@ -90,6 +91,8 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
   if (unsupportedCases.length) {
     return result('NOT_VERIFIED', `Evaluator did not support test case(s): ${unsupportedCases.map(test => test.id).join(', ')}.`, `Clarify or rerun ${unsupportedCases[0]!.id}.`, unsupportedCases.map(test => `${test.id}: evaluator did not support expected behavior`));
   }
+  const gap = behaviorGap(input.snapshot, input.tester, input.testerReport, input.checks ?? []);
+  if (gap) return result('NOT_VERIFIED', gap, 'Run fresh /qa and exercise the application through its public interface. Do not substitute developer checks.', [gap]);
   return result('PASS', 'All required behaviors have supporting test evidence and the required test cases passed.', 'No further verification required for this snapshot.', []);
 }
 

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { deriveContract, fingerprintText, sanitizeContract, ticketStale, type IntentContext } from './contract.ts';
 import { markKeyRejected, resolveKey, type SecretStore } from './credentials.ts';
@@ -16,6 +16,8 @@ import { materializeWorkspace } from './workspace.ts';
 import type { GitExec } from './git.ts';
 import { checkReviewerReport, checkTesterReport } from './schema.ts';
 import { recommendedActions } from './actions.ts';
+import { readTicketSource } from './tickets.ts';
+import { qaSurface } from './behavior.ts';
 import { writeArtifacts } from './export.ts';
 import type { QaProgressEvent } from './progress.ts';
 
@@ -51,7 +53,9 @@ export async function runQa(input: OrchestrateInput): Promise<QaRunRecord> {
   const started = Date.now();
   const settings = input.settings ?? loadSettings(input.agentDir ?? agentHome());
   input.onProgress?.({ kind: 'stage', stage: 'capturing', message: input.scope === 'target' ? 'Capturing available evidence for the QA target…' : 'Capturing the current change…' });
-  const captured = await captureSnapshot(input.cwd, { git: input.git, settings, base: input.base, now: input.now, runId: input.runId, scope: input.scope, filesystemTarget: input.filesystemTarget, targetPaths: input.targetPaths });
+  const evidence = await captureSnapshot(input.cwd, { git: input.git, settings, base: input.base, now: input.now, runId: input.runId, scope: input.scope, filesystemTarget: input.filesystemTarget, targetPaths: input.targetPaths });
+  const surface = await qaSurface(input.cwd, input.intent.userRequest?.text ?? '', evidence.snapshot.paths);
+  const captured = { ...evidence, snapshot: { ...evidence.snapshot, qaSurface: surface } };
   input.onProgress?.({ kind: 'snapshot', fingerprint: captured.snapshot.fingerprint, paths: captured.snapshot.paths.length });
   const { contract, problems } = buildContract(input.pendingContract, input.intent, captured);
   const runDir = await prepareRunDir(captured.snapshot.runId, input.home ?? prjctHome());
@@ -125,7 +129,7 @@ export async function evaluateExisting(runId: string, input: Omit<OrchestrateInp
   }
   return finish({
     input, settings, started: Date.now(),
-    captured: { snapshot: record.snapshot, blobs: new Map() },
+    captured: { snapshot: { ...record.snapshot, qaSurface: record.snapshot.qaSurface ?? await qaSurface(record.snapshot.cwd, record.contract.description, record.snapshot.paths) }, blobs: new Map() },
     contract: record.contract,
     contractProblems: record.contractProblems,
     runDir: join((input.home ?? prjctHome()), 'pi-qa', 'runs', runId),
@@ -141,8 +145,7 @@ export { formatReport };
 
 const selectedTicketStale = async (contract: EvaluationContract, cwd: string): Promise<boolean> => {
   if (!contract.ticketRef || !contract.ticketFingerprint) return false;
-  if (!/^docs\/tickets\/[a-zA-Z0-9][\w.-]*\.md$/.test(contract.ticketRef)) return true;
-  const text = await readFile(join(cwd, contract.ticketRef), 'utf8').catch(() => undefined);
+  const text = await readTicketSource(cwd, contract.ticketRef).catch(() => undefined);
   return text === undefined || ticketStale(contract, fingerprintText(text));
 };
 

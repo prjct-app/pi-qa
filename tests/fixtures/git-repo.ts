@@ -20,6 +20,10 @@ export async function gitRepo(prefix = 'pi-qa-git-'): Promise<string> {
   return dir;
 }
 
+export async function featureBranch(dir: string, name: string): Promise<void> {
+  await exec('git', ['switch', '-c', name], { cwd: dir });
+}
+
 export async function commitFile(dir: string, relative: string, content: string, message: string): Promise<void> {
   await mkdir(join(dir, relative, '..'), { recursive: true }).catch(() => undefined);
   await writeFile(join(dir, relative), content);
