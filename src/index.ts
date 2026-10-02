@@ -17,7 +17,6 @@ import { checkContract } from './schema.ts';
 import { clip, plain } from './text.ts';
 import { qaLivePanelSpec } from './panel.ts';
 import { createQaLiveModel, type QaLiveModel } from './progress.ts';
-import { createJevClient } from './jev.ts';
 import { pickQaModel } from './route.ts';
 import { panelActions, present as presentRecord, registerQaRenderers } from './command-ui.ts';
 import { parseArgs, refersToThisExtension, findSelfTarget } from './command-target.ts';
