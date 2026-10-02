@@ -1,7 +1,7 @@
 {
   "name": "@prjct.app/pi-qa",
-  "version": "0.7.3",
-    "description": "QA agent for Pi: two independent agents, auditable evidence, and a Jev-backed verdict for any evaluation target.",
+  "version": "0.7.4",
+  "description": "Run an isolated QA agent in PI Agent, capture auditable test evidence, and evaluate explicit targets with Jev-backed verdicts.",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -19,7 +19,8 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/prjct-app/pi-qa/main/docs/cover.png"
   },
   "files": [
     "index.ts",
@@ -52,7 +53,7 @@
     "@modelcontextprotocol/core": "2.0.0",
     "@modelcontextprotocol/ext-apps": "2.0.0",
     "@napi-rs/keyring": "1.3.0",
-    "@prjct.app/pi-tui-kit": "^0.3.0",
+    "@prjct.app/pi-tui-kit": "^0.3.1",
     "@typesafe-ai/sdk": "0.6.0",
     "playwright-core": "^1.63.0",
     "zod": "^4.6.5"
@@ -81,5 +82,8 @@
       "@napi-rs/keyring",
       "playwright-core"
     ]
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

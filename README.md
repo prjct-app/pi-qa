@@ -1,16 +1,20 @@
 # @prjct.app/pi-qa
 
+[![pi-qa — for PI Agent](https://raw.githubusercontent.com/prjct-app/pi-qa/main/docs/cover.png)](https://pi.dev)
+
 Pi QA agent for code changes, tickets, deployed systems, smoke tests, artifacts, and other explicit evaluation targets.
 
 `/qa <mission>` launches one isolated QA agent that designs and executes test cases. Jev evaluates evidence internally. Results are `PASS`, `FAIL`, `NOT_VERIFIED`, or `STALE`.
 
 ## Install
 
-For the published package, add it to Pi and restart:
+Install the published package and reload Pi:
 
-```json
-{ "packages": ["@prjct.app/pi-qa"] }
+```sh
+pi install npm:@prjct.app/pi-qa
 ```
+
+For a project-only installation, add `--local`.
 
 For the local checkout used by this workspace:
 
