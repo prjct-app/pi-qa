@@ -14,6 +14,8 @@ export type QaSettings = {
   largeFileBytes: number;
   patchChars: number;
   idleSetupMs: number;
+  /** When true, Jev rates the QA mission and picks the model from the session's enabled list. */
+  routeModels: boolean;
 };
 
 export const defaultSettings = (): QaSettings => ({
@@ -26,6 +28,7 @@ export const defaultSettings = (): QaSettings => ({
   largeFileBytes: 262_144,
   patchChars: 200_000,
   idleSetupMs: 5 * 60_000,
+  routeModels: false,
 });
 
 export const agentHome = (): string => {
@@ -53,6 +56,7 @@ export function loadSettings(home = agentHome(), warn: (text: string) => void = 
       if (key === 'largeFileBytes' && isPositiveInt(value, 8_192, 2_000_000)) return { ...settings, largeFileBytes: value };
       if (key === 'patchChars' && isPositiveInt(value, 4_000, 1_000_000)) return { ...settings, patchChars: value };
       if (key === 'idleSetupMs' && isPositiveInt(value, 30_000, 30 * 60_000)) return { ...settings, idleSetupMs: value };
+      if (key === 'routeModels' && typeof value === 'boolean') return { ...settings, routeModels: value };
       warn(`${file}: invalid ${key}; keeping the previous value.`);
       return settings;
     }, defaultSettings());

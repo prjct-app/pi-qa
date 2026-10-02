@@ -17,7 +17,8 @@ import { checkContract } from './schema.ts';
 import { clip, plain } from './text.ts';
 import { qaLivePanelSpec } from './panel.ts';
 import { createQaLiveModel, type QaLiveModel } from './progress.ts';
-import { selectQaModel } from './model.ts';
+import { createJevClient } from './jev.ts';
+import { pickQaModel } from './route.ts';
 import { panelActions, present as presentRecord, registerQaRenderers } from './command-ui.ts';
 import { parseArgs, refersToThisExtension, findSelfTarget } from './command-target.ts';
 
@@ -183,12 +184,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
       ? ctx.scopedModels.map(entry => entry.model)
       : ctx.modelRegistry?.getAvailable?.() ?? [];
     const textModels = availableModels.filter(model => model.input.includes('text'));
-    const selectedModel = selectQaModel(textModels, ctx.model, settings.qaModel);
-    if (!selectedModel) {
-      output('No authenticated model is available for the QA agent.');
-      return;
-    }
-    const model = { provider: selectedModel.provider, id: selectedModel.id };
     const runId = randomUUID();
     const controller = new AbortController();
     const inferredSelfTarget = !target && request && refersToThisExtension(request)
@@ -200,6 +195,23 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     const runCwd = targetPath && targetStat?.isFile() ? dirname(targetPath) : targetPath ?? ctx.cwd;
     const targetPaths = targetPath ? [targetStat?.isFile() ? basename(targetPath) : '.'] : undefined;
     const targetMission = request ?? (targetPath ? `Evaluate the explicit target ${targetPath}.` : undefined);
+    const picked = await pickQaModel({
+      textModels,
+      current: ctx.model,
+      override: settings.qaModel,
+      routeEnabled: settings.routeModels,
+      mission: targetMission,
+      store,
+      env: deps.env ?? process.env,
+      settings,
+      jevFactory: deps.jevFactory ?? createJevClient,
+    });
+    const selectedModel = picked.model;
+    if (!selectedModel) {
+      output('No authenticated model is available for the QA agent.');
+      return;
+    }
+    const model = { provider: selectedModel.provider, id: selectedModel.id };
     const live = createQaLiveModel(runId, targetMission ?? 'Deriving QA mission from the current Pi context…');
     set({ active: { runId, controller, live } });
     if (ctx.mode === 'tui' && ctx.hasUI) {
