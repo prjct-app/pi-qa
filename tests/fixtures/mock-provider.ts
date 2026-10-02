@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { getCurrentTools, type AssistantMessage } from '@earendil-works/pi-ai';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/compat';
 import { REVIEWER_REPORT_TOOL, TESTER_REPORT_TOOL } from '../../src/schema.ts';
 
@@ -10,12 +11,12 @@ export default function fixtureProvider(pi: ExtensionAPI): void {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
     streamSimple(model, context, options) {
       const stream = createAssistantMessageEventStream();
-      const message: any = {
+      const message: AssistantMessage = {
         role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
         usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
         timestamp: Date.now(), stopReason: 'toolUse',
       };
-      const names = (context.tools ?? []).map(tool => tool.name);
+      const names = getCurrentTools(context.messages).map(tool => tool.name);
       const wait = JSON.stringify(context.messages).includes('fixture-wait');
       const finish = () => {
         if (wait) {
@@ -24,7 +25,7 @@ export default function fixtureProvider(pi: ExtensionAPI): void {
           stream.end();
           return;
         }
-        const previous = context.messages.at(-1) as { role?: string; toolName?: string } | undefined;
+        const previous = context.messages.at(-1);
         if (previous?.role === 'toolResult' && (previous.toolName === REVIEWER_REPORT_TOOL || previous.toolName === TESTER_REPORT_TOOL)) {
           message.stopReason = 'stop';
           message.content = [{ type: 'text', text: 'Report delivered.' }];
