@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext, ExtensionToolContext, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { installQa, type QaDependencies } from '../src/index.ts';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { COMMAND } from '../src/schema.ts';
@@ -40,6 +40,17 @@ export function harness(root: string, options: {
       custom: async (factory: unknown) => { customCalls.push(factory); return null; },
     },
   } as unknown as ExtensionContext;
+  const toolContext: ExtensionToolContext = {
+    ...context,
+    tools: [],
+    async executeTool(name) {
+      return {
+        toolCall: { type: 'toolCall', id: 'test/nested', name, arguments: {} },
+        result: { content: [{ type: 'text', text: `Unknown fixture tool: ${name}` }], details: {} },
+        isError: true,
+      };
+    },
+  };
   const pi = {
     appendEntry: (type: string, data: unknown) => { entries.push({ type, data }); },
     sendMessage: () => undefined,
@@ -52,6 +63,6 @@ export function harness(root: string, options: {
     tools, commands, notices, entries, customCalls, sessionManager,
     async emit(name: string) { for (const handler of handlers.get(name) ?? []) await handler({}, context); },
     async command(text: string) { return commands.get(COMMAND)!.handler(text, context); },
-    async tool(name: string, params: unknown) { return tools.get(name)!.execute('test', params as never, undefined, undefined, context); },
+    async tool(name: string, params: unknown) { return tools.get(name)!.execute('test', params as never, undefined, undefined, toolContext); },
   };
 }
