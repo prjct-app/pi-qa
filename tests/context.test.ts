@@ -101,3 +101,25 @@ test('loadIntent recovers a ticket from the active exchange after an assistant a
   const loaded = await loadIntent(context, dir, 'realiza las pruebas');
   assert.equal(loaded.ticket?.ref, 'docs/project/work/tasks/PRJ-T315.md');
 }));
+
+test('old runs keep their records and evidence but drop working copies', async () => {
+  const { mkdtemp, mkdir: mk, writeFile: wf, readdir: rd, utimes } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join: j } = await import('node:path');
+  const { pruneRuns, runsRoot, KEEP_WORKING_COPIES } = await import('../src/store.ts');
+  const home = await mkdtemp(j(tmpdir(), 'qa-prune-'));
+  const root = runsRoot(home);
+  const total = KEEP_WORKING_COPIES + 3;
+  for (let i = 0; i < total; i++) {
+    const dir = j(root, `run-${i}`);
+    await mk(j(dir, 'tester', 'repo', 'node_modules'), { recursive: true });
+    await mk(j(dir, 'artifacts'), { recursive: true });
+    await wf(j(dir, 'report.json'), '{}');
+    const at = new Date(Date.now() - (total - i) * 60_000);
+    await utimes(dir, at, at);
+  }
+  await pruneRuns('run-0', home);
+  assert.deepEqual((await rd(j(root, 'run-0'))).sort(), ['artifacts', 'report.json', 'tester'], 'the run starting now is never touched');
+  assert.deepEqual((await rd(j(root, 'run-1'))).sort(), ['artifacts', 'report.json'], 'an old run keeps its record and evidence');
+  assert.ok((await rd(j(root, `run-${total - 1}`))).includes('tester'), 'recent runs keep their working copies');
+});

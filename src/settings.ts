@@ -1,3 +1,4 @@
+import { JEV_MODEL } from '@prjct.app/pi-tui-kit';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +20,7 @@ export type QaSettings = {
 };
 
 export const defaultSettings = (): QaSettings => ({
-  jevModel: 'jev-1.13.0',
+  jevModel: JEV_MODEL,
   confidenceThreshold: 0.8,
   noulThreshold: 0.8,
   timeoutMs: 10 * 60_000,

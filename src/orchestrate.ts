@@ -9,7 +9,7 @@ import { sdkRunner, type QaRunner, type ThinkingLevel } from './runner.ts';
 import type { EvaluationContract, QaRunRecord, ReviewerReport, TesterReport } from './schema.ts';
 import { checkContract, emptyReviewer, emptyTester } from './schema.ts';
 import { captureSnapshot, currentFingerprint, type CapturedSnapshot } from './snapshot.ts';
-import { prepareRunDir, readLatest, readRun, writeEval, writeLatest, writeRun } from './store.ts';
+import { prepareRunDir, readLatest, readRun, writeEval, writeLatest, writeRun, pruneRuns } from './store.ts';
 import { agentHome, loadSettings, prjctHome, type QaSettings } from './settings.ts';
 import { decideVerdict } from './verdict.ts';
 import { materializeWorkspace } from './workspace.ts';
@@ -59,6 +59,7 @@ export async function runQa(input: OrchestrateInput): Promise<QaRunRecord> {
   input.onProgress?.({ kind: 'snapshot', fingerprint: captured.snapshot.fingerprint, paths: captured.snapshot.paths.length });
   const { contract, problems } = buildContract(input.pendingContract, input.intent, captured);
   const runDir = await prepareRunDir(captured.snapshot.runId, input.home ?? prjctHome());
+  void pruneRuns(captured.snapshot.runId, input.home ?? prjctHome()).catch(() => undefined);
   await persistSnapshot(runDir, captured, contract);
   if (captured.snapshot.resolutionError) {
     input.onActive?.({ runId: captured.snapshot.runId, done: Promise.resolve() });
