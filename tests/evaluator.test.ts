@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { evaluateEvidence } from '../src/evaluate.ts';
 import { defaultSettings } from '../src/settings.ts';
-import { fakeJev } from './fixtures/fakes.ts';
+import { fakeEvaluator } from './fixtures/fakes.ts';
 import type { EvaluationContract, ExecutionReceipt, Snapshot, TesterReport } from '../src/schema.ts';
 
 const snapshot = (): Snapshot => ({
@@ -35,9 +35,9 @@ const input = () => ({
   snapshot: snapshot(), blobs: new Map(), contract: contract(), reviewer: { findings: [], notes: '', blockers: [] }, tester: tester(), executions: receipts(), settings: defaultSettings(),
 });
 
-test('all test cases and requirements are evaluated in one Jev request', async () => {
+test('all test cases and requirements are evaluated in one Evaluator request', async () => {
   const calls: unknown[] = [];
-  const base = fakeJev({ test: 'supports', criterion: 'supports' })('k'.repeat(20), defaultSettings());
+  const base = fakeEvaluator({ test: 'supports', criterion: 'supports' });
   const client = { ...base, systemOne: (async request => { calls.push(request); return base.systemOne(request); }) as typeof base.systemOne };
   const result = await evaluateEvidence({ ...input(), client });
   assert.equal(calls.length, 1);
@@ -45,31 +45,31 @@ test('all test cases and requirements are evaluated in one Jev request', async (
   assert.deepEqual(Object.keys(request.questions), ['test_0', 'test_1', 'criterion_0', 'criterion_1']);
   assert.equal(request.state.testCases.length, 2);
   assert.equal(request.state.requirements.length, 2);
-  assert.equal(result.testJev.length, 2);
+  assert.equal(result.testEvaluator.length, 2);
   assert.ok(result.criteria.every(item => item.label === 'supports'));
-  assert.deepEqual(result.jev, { modelActual: 'jev-1.13.0', error: undefined, inputTokens: 12, outputTokens: 3 });
+  assert.deepEqual(result.evaluator, { modelActual: 'fixture/active-model', error: undefined, inputTokens: 12, outputTokens: 3 });
 });
 
-test('one Jev timeout blocks the whole batch without retry fan-out', async () => {
+test('one Evaluator timeout blocks the whole batch without retry fan-out', async () => {
   const calls = { count: 0 };
-  const base = fakeJev({ timeout: true })('k'.repeat(20), defaultSettings());
+  const base = fakeEvaluator({ timeout: true });
   const client = { ...base, systemOne: (async request => { calls.count += 1; return base.systemOne(request); }) as typeof base.systemOne };
   const result = await evaluateEvidence({ ...input(), client });
   assert.equal(calls.count, 1);
-  assert.ok(result.testJev.every(decision => decision.label === 'timeout'));
+  assert.ok(result.testEvaluator.every(decision => decision.label === 'timeout'));
   assert.ok(result.criteria.every(item => item.label === 'insufficient_evidence'));
 });
 
 test('low-confidence batch answers never become PASS support', async () => {
-  const client = fakeJev({ test: 'supports', criterion: 'supports', confidence: 0.4 })('k'.repeat(20), defaultSettings());
+  const client = fakeEvaluator({ test: 'supports', criterion: 'supports', confidence: 0.4 });
   const result = await evaluateEvidence({ ...input(), client });
-  assert.ok(result.testJev.every(decision => decision.label === 'low_confidence'));
+  assert.ok(result.testEvaluator.every(decision => decision.label === 'low_confidence'));
   assert.ok(result.criteria.every(item => item.label === 'insufficient_evidence'));
 });
 
-test('missing Jev client produces no request and no evaluator PASS', async () => {
+test('missing Evaluator client produces no request and no evaluator PASS', async () => {
   const result = await evaluateEvidence(input());
-  assert.ok(result.testJev.every(decision => decision.label === 'unavailable'));
+  assert.ok(result.testEvaluator.every(decision => decision.label === 'unavailable'));
   assert.ok(result.criteria.every(item => item.label === 'insufficient_evidence'));
-  assert.equal(result.jev.inputTokens, 0);
+  assert.equal(result.evaluator.inputTokens, 0);
 });

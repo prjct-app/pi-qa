@@ -1,24 +1,7 @@
 import type { AgentOutcome, AgentRole, ReviewerReport, TesterReport } from '../../src/schema.ts';
 import type { QaRunner } from '../../src/runner.ts';
-import type { JevClient, JevFactory } from '../../src/jev.ts';
-import type { SecretStore } from '../../src/credentials.ts';
-import { KEYRING_ACCOUNT } from '../../src/schema.ts';
+import type { EvaluatorClient } from '../../src/evaluator.ts';
 import { defaultSettings } from '../../src/settings.ts';
-
-export const memoryStore = (initial?: string): SecretStore => {
-  const slot: { value: string | null } = { value: initial ?? null };
-  return {
-    get: async account => account === KEYRING_ACCOUNT ? slot.value : null,
-    set: async (_account, secret) => { slot.value = secret; },
-    delete: async () => { slot.value = null; },
-  };
-};
-
-export const failingStore = (): SecretStore => ({
-  get: async () => { throw new Error('Cannot access the OS keyring. Unlock it and try again; no plaintext fallback is used.'); },
-  set: async () => { throw new Error('Cannot access the OS keyring. Unlock it and try again; no plaintext fallback is used.'); },
-  delete: async () => { throw new Error('Cannot access the OS keyring. Unlock it and try again; no plaintext fallback is used.'); },
-});
 
 export function fakeRunner(reports: { reviewer?: ReviewerReport; tester?: TesterReport; fail?: AgentRole; timeout?: AgentRole }): QaRunner {
   return async input => {
@@ -51,7 +34,7 @@ export function trackingRunner(): { runner: QaRunner; launched: AgentRole[] } {
   };
 }
 
-export const fakeJev = (opts: {
+export const fakeEvaluator = (opts: {
   finding?: 'supports' | 'contradicts' | 'insufficient_evidence';
   criterion?: 'supports' | 'contradicts' | 'insufficient_evidence';
   test?: 'supports' | 'contradicts' | 'insufficient_evidence';
@@ -59,10 +42,9 @@ export const fakeJev = (opts: {
   confidence?: number;
   timeout?: boolean;
   model?: string;
-}): JevFactory => {
-  return () => {
-    const client: JevClient = {
-      modelPin: defaultSettings().jevModel,
+}): EvaluatorClient => {
+    const client: EvaluatorClient = {
+      modelPin: 'fixture/active-model',
       systemOne: async request => {
         if (opts.timeout) {
           const error = new Error('timeout');
@@ -71,7 +53,7 @@ export const fakeJev = (opts: {
         }
         const questions = request.questions as Record<string, { type?: string }>;
         const confidence = opts.confidence ?? 0.92;
-        const model = opts.model ?? 'jev-1.13.0';
+        const model = opts.model ?? 'fixture/active-model';
         const usage = { input_tokens: 12, output_tokens: 3 };
         const answers = Object.fromEntries(Object.keys(questions).map(key => {
           const picked = key.startsWith('test_')
@@ -79,9 +61,8 @@ export const fakeJev = (opts: {
             : opts.criterion ?? 'supports';
           return [key, { choice: picked, confidence }];
         }));
-        return { answers, model, usage } as Awaited<ReturnType<JevClient['systemOne']>>;
+        return { answers, model, usage } as Awaited<ReturnType<EvaluatorClient['systemOne']>>;
       },
     };
     return client;
-  };
 };

@@ -1,4 +1,4 @@
-import type { AgentOutcome, CriterionEvaluation, DeterministicCheck, EvaluationContract, JevDecision, QaVerdict, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
+import type { AgentOutcome, CriterionEvaluation, DeterministicCheck, EvaluationContract, EvaluatorDecision, QaVerdict, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
 import { behaviorGap } from './behavior.ts';
 
 export type VerdictInput = {
@@ -10,12 +10,12 @@ export type VerdictInput = {
   tester: AgentOutcome;
   reviewerReport: ReviewerReport;
   testerReport: TesterReport;
-  findingJev: JevDecision[];
-  findingImpactJev?: JevDecision[];
-  testJev?: JevDecision[];
-  testFailureJev?: JevDecision[];
+  findingEvaluator: EvaluatorDecision[];
+  findingImpactEvaluator?: EvaluatorDecision[];
+  testEvaluator?: EvaluatorDecision[];
+  testFailureEvaluator?: EvaluatorDecision[];
   stale: boolean;
-  jevAvailable: boolean;
+  evaluatorAvailable: boolean;
   evaluatorConfigured?: boolean;
   evaluatorError?: string;
   snapshotError?: string;
@@ -41,12 +41,12 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
     return result('NOT_VERIFIED', `QA agent ${input.tester.status}. Partial test evidence was kept.`, 'Re-run /qa, or inspect the preserved test cases.', [`QA agent ${input.tester.status}`]);
   }
   const required = input.criteria.filter(item => item.required && item.source !== 'inferred_from_diff');
-  if (!input.jevAvailable) {
+  if (!input.evaluatorAvailable) {
     if (input.evaluatorConfigured === false) {
-      return result('NOT_VERIFIED', 'QA completed, but the global evaluator credential is not configured.', 'Run /qa setup once, then /qa evaluate this run.', ['Evaluator credential missing']);
+      return result('NOT_VERIFIED', 'QA completed, but the selected Pi model is unavailable.', 'Select an available model in Pi, then /qa evaluate this run.', ['Pi model unavailable']);
     }
     if (input.evaluatorError) {
-      return result('NOT_VERIFIED', `QA completed, but evaluation failed: ${input.evaluatorError}`, 'Fix the global evaluator connection, then /qa evaluate this run.', ['Evaluator unavailable']);
+      return result('NOT_VERIFIED', `QA completed, but evaluation failed: ${input.evaluatorError}`, 'Restore the selected Pi model connection, then /qa evaluate this run.', ['Evaluator unavailable']);
     }
     const missingTarget = input.snapshot?.scope === 'target' && input.snapshot.paths.length === 0;
     const unverifiedExecution = input.testerReport.tests.some(test => test.skipped
@@ -57,8 +57,8 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
         'NOT_VERIFIED',
         'The captured test evidence is incomplete. Re-evaluating this snapshot cannot establish the requested behavior.',
         missingTarget
-          ? 'Provide an explicit target with /qa --target <path> (or a URL in the mission), configure Jev, then run fresh /qa. Do not evaluate this snapshot.'
-          : 'Resolve the skipped or unverified test capability, configure Jev, then run fresh /qa. Do not evaluate this snapshot.',
+          ? 'Provide an explicit target with /qa --target <path> (or a URL in the mission), restore the selected Pi model, then run fresh /qa. Do not evaluate this snapshot.'
+          : 'Resolve the skipped or unverified test capability, restore the selected Pi model, then run fresh /qa. Do not evaluate this snapshot.',
         [missingTarget ? 'No target captured' : 'Test case blocked'],
       );
     }
@@ -87,7 +87,7 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
   if (unasserted.length) {
     return result('NOT_VERIFIED', `Tests did not assert required behavior: ${unasserted.map(item => item.id).join(', ')}. Green exits are not enough.`, `Add a check that asserts ${unasserted[0]!.id}.`, unasserted.map(item => `${item.id} was not asserted`));
   }
-  const unsupportedCases = input.testerReport.tests.filter(test => !test.skipped && !(input.testJev ?? []).some(decision => decision.subjectId === test.id && decision.question === 'test' && decision.label === 'supports'));
+  const unsupportedCases = input.testerReport.tests.filter(test => !test.skipped && !(input.testEvaluator ?? []).some(decision => decision.subjectId === test.id && decision.question === 'test' && decision.label === 'supports'));
   if (unsupportedCases.length) {
     return result('NOT_VERIFIED', `Evaluator did not support test case(s): ${unsupportedCases.map(test => test.id).join(', ')}.`, `Clarify or rerun ${unsupportedCases[0]!.id}.`, unsupportedCases.map(test => `${test.id}: evaluator did not support expected behavior`));
   }
@@ -101,7 +101,7 @@ const substantiatedProductFailures = (input: VerdictInput): string[] =>
     !test.skipped
     && (input.checks ?? []).some(check => check.subjectId === test.id && check.kind === 'test-provenance' && check.ok)
     && (input.checks ?? []).some(check => check.subjectId === test.id && check.kind === 'test-definition' && check.ok)
-    && (input.testJev ?? []).some(decision => decision.subjectId === test.id && decision.question === 'test' && decision.label === 'contradicts'),
+    && (input.testEvaluator ?? []).some(decision => decision.subjectId === test.id && decision.question === 'test' && decision.label === 'contradicts'),
   ).map(test => test.id);
 
 const nextFail = (input: VerdictInput): string => {

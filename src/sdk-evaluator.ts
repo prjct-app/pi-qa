@@ -1,6 +1,6 @@
 import { protectOutboundData } from '@prjct.app/pi-secrets/privacy';
 import { ModelRuntime, type ModelRegistry } from '@earendil-works/pi-coding-agent';
-import type { JevClient, JevAnswers } from './jev.ts';
+import type { EvaluatorClient, EvaluatorAnswers } from './evaluator.ts';
 import type { ThinkingLevel } from './runner.ts';
 
 type Runtime = Pick<ModelRuntime, 'getModel' | 'completeSimple'>;
@@ -18,7 +18,7 @@ Return JSON only: {"answers":{"question_id":{"choice":"supports|contradicts|insu
 Do not invent executions, observations or requirements. When evidence is incomplete, say insufficient_evidence.`;
 
 /** The active Pi model owns evaluation; no secondary classifier or credential is required. */
-export const createSdkEvaluator = (options: Options): JevClient => ({
+export const createSdkEvaluator = (options: Options): EvaluatorClient => ({
   modelPin: `${options.model.provider}/${options.model.id}`,
   systemOne: async (request, call) => {
     // Reuse the extension context's public facade, including providers registered
@@ -36,8 +36,8 @@ export const createSdkEvaluator = (options: Options): JevClient => ({
     }, { reasoning: options.thinkingLevel === 'off' ? undefined : options.thinkingLevel ?? 'medium', maxTokens: Math.min(model.maxTokens, 32768), signal });
     if (message.stopReason === 'error' || message.stopReason === 'aborted') throw new Error(message.errorMessage || `Evaluation ${message.stopReason}.`);
     const text = message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n').trim();
-    const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/u, '').replace(/\s*```$/u, '')) as { answers?: JevAnswers };
-    const answers: JevAnswers = Object.fromEntries(Object.keys(request.questions).map(key => {
+    const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/u, '').replace(/\s*```$/u, '')) as { answers?: EvaluatorAnswers };
+    const answers: EvaluatorAnswers = Object.fromEntries(Object.keys(request.questions).map(key => {
       const answer = parsed?.answers?.[key];
       const valid = answer && ['supports', 'contradicts', 'insufficient_evidence'].includes(answer.choice ?? '')
         && Number.isFinite(answer.confidence) && answer.confidence! >= 0 && answer.confidence! <= 1;

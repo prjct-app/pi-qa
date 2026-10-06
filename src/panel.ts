@@ -109,8 +109,7 @@ const resultDetail = (record: QaRunRecord): PanelDetail => ({
     { label: 'snapshot', value: record.snapshot.fingerprint },
     { label: 'base', value: record.snapshot.base ?? '—' },
     { label: 'head', value: record.snapshot.head ?? '—' },
-    { label: 'Jev', value: record.jev.available ? `${record.jev.modelActual ?? record.jev.modelPin} · ${record.jev.inputTokens} in / ${record.jev.outputTokens} out` : record.jev.error ?? 'not verified', tone: record.jev.available ? 'success' : 'warning' },
-    { label: 'credential', value: `${record.jev.credentialSource ?? 'unknown'} · ${record.jev.keyFingerprint ?? 'no fingerprint'}`, tone: record.jev.keyFingerprint ? 'muted' : 'warning' },
+    { label: 'Evaluator', value: record.evaluator.available ? `${record.evaluator.modelActual ?? record.evaluator.modelPin} · ${record.evaluator.inputTokens} in / ${record.evaluator.outputTokens} out` : record.evaluator.error ?? 'not verified', tone: record.evaluator.available ? 'success' : 'warning' },
   ],
   sections: [
     { title: 'Mission', lines: [safe(record.contract.description)] },
@@ -142,7 +141,7 @@ const criterionDetail = (criterion: CriterionEvaluation): PanelDetail => ({
     { label: 'tests', value: criterion.tests.join(', ') || '—' },
     { label: 'findings', value: criterion.findings.join(', ') || '—' },
   ],
-  sections: criterion.jev.length ? [{ title: 'Jev', lines: criterion.jev.map(decision => `${decision.label} · ${decision.confidence.toFixed(2)}${decision.error ? ` · ${safe(decision.error, 300)}` : ''}`) }] : [],
+  sections: criterion.evaluator.length ? [{ title: 'Evaluator', lines: criterion.evaluator.map(decision => `${decision.label} · ${decision.confidence.toFixed(2)}${decision.error ? ` · ${safe(decision.error, 300)}` : ''}`) }] : [],
 });
 
 const actionDetail = (action: QaRecommendedAction): PanelDetail => ({

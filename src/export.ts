@@ -35,7 +35,7 @@ export const qaPrompt = (record: QaRunRecord): string => {
     const receipts = ids.map(id => executions.find(receipt => receipt.id === id)).filter(receipt => Boolean(receipt));
     const unknown = ids.filter(id => !executions.some(receipt => receipt.id === id));
     const failedChecks = record.checks.filter(check => check.subjectId === test.id && !check.ok);
-    const decision = record.testJev?.find(value => value.subjectId === test.id && value.question === 'test');
+    const decision = record.testEvaluator?.find(value => value.subjectId === test.id && value.question === 'test');
     return [
       `## ${outcome} · ${test.id}`,
       `Expected: ${safe(test.expected ?? test.assertion)}`,
@@ -146,7 +146,7 @@ const markdown = (record: QaRunRecord): string => {
     `- Snapshot: \`${record.snapshot.fingerprint}\``,
     `- Scope: ${record.snapshot.scope ?? 'change'}`,
     `- QA agent: ${record.agents.tester.status}`,
-    `- Jev: ${record.jev.available ? record.jev.modelActual ?? record.jev.modelPin : 'NOT_VERIFIED'}`,
+    `- Evaluator: ${record.evaluator.available ? record.evaluator.modelActual ?? record.evaluator.modelPin : 'NOT_VERIFIED'}`,
     '',
     '## Criteria',
     criteria,

@@ -13,9 +13,6 @@ export const COMMAND = 'qa';
 export const CONTRACT_TOOL = 'pi_qa_contract';
 export const REVIEWER_REPORT_TOOL = 'pi_qa_reviewer_report';
 export const TESTER_REPORT_TOOL = 'pi_qa_tester_report';
-// The keyring identity and the credential vocabulary are shared with every
-// other prjct extension; pi-tui-kit owns them so two copies cannot drift apart.
-export { CREDENTIAL_STATES, KEYRING_ACCOUNT, KEYRING_SERVICE, type CredentialState } from '@prjct.app/pi-tui-kit';
 export const CUSTOM_RUN = 'pi-qa-run';
 export const CUSTOM_CONTRACT = 'pi-qa-contract';
 export const CUSTOM_STATUS = 'pi-qa-status';
@@ -214,7 +211,7 @@ export type DeterministicCheck = {
   detail: string;
 };
 
-export type JevDecision = {
+export type EvaluatorDecision = {
   subjectId: string;
   question: string;
   label: EvidenceLabel | 'noul_true' | 'noul_false' | 'unavailable' | 'timeout' | 'low_confidence';
@@ -232,7 +229,7 @@ export type CriterionEvaluation = {
   required: boolean;
   label: EvidenceLabel;
   reason: string;
-  jev: JevDecision[];
+  evaluator: EvaluatorDecision[];
   tests: string[];
   findings: string[];
 };
@@ -244,7 +241,7 @@ export type QaExportSummary = {
 
 export type QaRecommendedAction = {
   id: string;
-  kind: 'rerun' | 'export' | 'copy_prompt' | 'comment_ticket' | 'create_defect' | 'request_input' | 'setup_jev';
+  kind: 'rerun' | 'export' | 'copy_prompt' | 'comment_ticket' | 'create_defect' | 'request_input';
   label: string;
   reason: string;
   primary: boolean;
@@ -262,14 +259,12 @@ export type QaRunRecord = {
   agents: { reviewer: AgentOutcome; tester: AgentOutcome };
   checks: DeterministicCheck[];
   criteria: CriterionEvaluation[];
-  jev: {
+  evaluator: {
     configured: boolean;
     modelPin: string;
     modelActual?: string;
     available: boolean;
     error?: string;
-    keyFingerprint?: string;
-    credentialSource?: 'env' | 'keyring' | 'none';
     inputTokens: number;
     outputTokens: number;
     latencyMs: number;
@@ -278,10 +273,10 @@ export type QaRunRecord = {
   contractProblems?: string[];
   recommendedActions?: QaRecommendedAction[];
   exports?: QaExportSummary;
-  findingJev?: JevDecision[];
-  findingImpactJev?: JevDecision[];
-  testJev?: JevDecision[];
-  testFailureJev?: JevDecision[];
+  findingEvaluator?: EvaluatorDecision[];
+  findingImpactEvaluator?: EvaluatorDecision[];
+  testEvaluator?: EvaluatorDecision[];
+  testFailureEvaluator?: EvaluatorDecision[];
   stale: boolean;
   latencyMs: number;
 };

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { harness } from './harness.ts';
-import { fakeJev, fakeRunner, memoryStore } from './fixtures/fakes.ts';
+import { fakeEvaluator, fakeRunner } from './fixtures/fakes.ts';
 import { commitFile, gitRepo, writeWorktree } from './fixtures/git-repo.ts';
 import { defaultSettings } from '../src/settings.ts';
 import { CONTRACT_TOOL } from '../src/schema.ts';
@@ -24,11 +24,10 @@ for (const mode of ['tui', 'rpc'] as const) {
       thinkingLevel: 'high',
       availableModels: [model('frontier-max', 20), model('qa-mini', 1)],
       dependencies: {
-        store: memoryStore('k'.repeat(20)),
         home: dest,
         settings: defaultSettings(),
         env: {},
-        jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+        evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
         runner: async input => {
           launched.push(input.role);
           selectedModels.push(input.model.id);
@@ -59,8 +58,7 @@ test('/qa uses Pi without asking for a separate evaluator credential', async () 
   const launched: string[] = [];
   const host = harness(dir, {
     mode: 'rpc',
-    dependencies: {
-      store: memoryStore(), home: dest, settings: defaultSettings(), env: {},
+    dependencies: { home: dest, settings: defaultSettings(), env: {},
       runner: async input => { launched.push(input.role); return fakeRunner({})(input); },
     },
   });
@@ -80,7 +78,7 @@ test('a run without a key keeps its evidence and reaches NOT_VERIFIED, not a ref
   const dest = await mkdtemp(join(tmpdir(), 'qa-nokey-'));
   const host = harness(dir, {
     mode: 'rpc',
-    dependencies: { store: memoryStore(), home: dest, settings: defaultSettings(), env: {}, runner: fakeRunner({}) },
+    dependencies: { home: dest, settings: defaultSettings(), env: {}, runner: fakeRunner({}) },
   });
   try {
     await host.command('smoke test this extension');
@@ -93,27 +91,13 @@ test('a run without a key keeps its evidence and reaches NOT_VERIFIED, not a ref
   }
 });
 
-test('/qa setup uses the shared docked secret UI without localhost server', async () => {
-  const dir = await gitRepo();
-  const host = harness(dir, { mode: 'tui', dependencies: { store: memoryStore(), settings: defaultSettings(), env: {} } });
-  try {
-    await host.command('setup');
-    assert.equal(host.customCalls.length, 1);
-    assert.equal(host.notices.some(text => /127\.0\.0\.1|localhost/i.test(text)), false);
-  } finally {
-    await host.emit('session_shutdown');
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
 test('/qa accepts an explicit QA mission without requiring a diff', async () => {
   const dir = await gitRepo();
   const dest = await mkdtemp(join(tmpdir(), 'qa-target-'));
   const launched: Array<{ role: string; scope: string | undefined; criterion: string | undefined }> = [];
   const host = harness(dir, {
-    dependencies: {
-      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+    dependencies: { home: dest, settings: defaultSettings(), env: {},
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       runner: async input => {
         launched.push({ role: input.role, scope: input.snapshot.scope, criterion: input.contract.items.find(item => item.id === 'U1')?.text });
         return fakeRunner({})(input);
@@ -139,9 +123,8 @@ test('explicit ticket QA ignores ambient .pi/ticket.md and isolates successive r
   await writeWorktree(dir, 'docs/tickets/07-onboarding.md', '# Ticket 07\n## Acceptance Criteria\n- Onboarding works\n');
   const seen: string[] = [];
   const host = harness(dir, {
-    dependencies: {
-      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+    dependencies: { home: dest, settings: defaultSettings(), env: {},
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       runner: async input => {
         seen.push(input.contract.items.map(item => item.text).join(' '));
         await assert.rejects(readFile(join(input.workspace, '.pi/ticket.md'), 'utf8'), { code: 'ENOENT' });
@@ -185,9 +168,8 @@ test('only the explicitly selected ticket can stale its QA run', async () => {
   await writeWorktree(dir, '.pi/ticket.md', '# Ticket 03\n- Old landing requirement\n');
   await writeWorktree(dir, 'docs/tickets/07-onboarding.md', '# Ticket 07\n## Acceptance Criteria\n- Onboarding works\n');
   const host = harness(dir, {
-    dependencies: {
-      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+    dependencies: { home: dest, settings: defaultSettings(), env: {},
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       runner: async input => {
         await writeWorktree(dir, '.pi/ticket.md', '# Ticket 03\n- Changed landing requirement\n');
         await writeWorktree(dir, 'docs/tickets/07-onboarding.md', '# Ticket 07\n## Acceptance Criteria\n- Changed onboarding requirement\n');
@@ -216,9 +198,8 @@ test('/qa infers the pi-qa target when the mission says this extension', async (
   const seen: string[] = [];
   const host = harness(dir, {
     dependencies: {
-      selfTarget: target,
-      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      selfTarget: target, home: dest, settings: defaultSettings(), env: {},
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       runner: async input => {
         seen.push(`${input.role}:${input.snapshot.cwd}:${input.snapshot.paths.map(path => path.path).join(',')}`);
         return fakeRunner({})(input);
@@ -243,9 +224,8 @@ test('/qa --target captures a quoted non-git directory for the QA agent', async 
   await writeFile(join(target, 'package.json'), '{"name":"target"}\n');
   const seen: string[] = [];
   const host = harness(dir, {
-    dependencies: {
-      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+    dependencies: { home: dest, settings: defaultSettings(), env: {},
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       runner: async input => {
         seen.push(`${input.role}:${await readFile(join(input.workspace, 'package.json'), 'utf8')}`);
         assert.deepEqual(input.snapshot.targetPaths, ['.']);
@@ -271,9 +251,8 @@ test('/qa cancel bypasses the run queue and aborts active agents immediately', a
   const gate: { resolve?: () => void } = {};
   const started = new Promise<void>(resolve => { gate.resolve = resolve; });
   const host = harness(dir, {
-    dependencies: {
-      store: memoryStore('k'.repeat(20)), home: dest, settings: { ...defaultSettings(), timeoutMs: 10_000 }, env: {},
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+    dependencies: { home: dest, settings: { ...defaultSettings(), timeoutMs: 10_000 }, env: {},
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       runner: async input => {
         launched.push(input.role);
         if (launched.length === 1) gate.resolve?.();
@@ -305,9 +284,8 @@ test('/qa evaluate without a snapshot starts a fresh QA run', async () => {
   await writeWorktree(dir, 'src.js', 'export const add = (a, b) => a - b;\n');
   const launched: string[] = [];
   const host = harness(dir, {
-    dependencies: {
-      store: memoryStore('k'.repeat(20)), home: dest, settings: defaultSettings(), env: {},
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+    dependencies: { home: dest, settings: defaultSettings(), env: {},
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       runner: async input => { launched.push(input.role); return fakeRunner({})(input); },
     },
   });
@@ -328,11 +306,10 @@ test('pi_qa_contract stores a pending contract and rejects inferred relabeling o
   await writeWorktree(dir, 'src.js', 'export const add = (a, b) => a + 1;\n');
   const host = harness(dir, {
     dependencies: {
-      store: memoryStore('k'.repeat(20)),
       home: dest,
       settings: defaultSettings(),
       env: {},
-      jevFactory: fakeJev({ criterion: 'supports', test: 'supports' }),
+      evaluator: fakeEvaluator({ criterion: 'supports', test: 'supports' }),
       runner: fakeRunner({}),
     },
   });

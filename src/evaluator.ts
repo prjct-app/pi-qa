@@ -1,42 +1,17 @@
-import { protectOutboundData } from '@prjct.app/pi-secrets/privacy';
-import { TypeSafeClient, choice } from '@typesafe-ai/sdk';
-import type { JevDecision } from './schema.ts';
+import type { EvaluatorDecision } from './schema.ts';
 import type { QaSettings } from './settings.ts';
 import { clip, plain } from './text.ts';
 
 export type JsonState = { [key: string]: string | number | boolean | null | JsonState | JsonState[] };
-export type JevAnswers = Record<string, { choice?: string; confidence?: number }>;
+export type EvaluatorAnswers = Record<string, { choice?: string; confidence?: number }>;
 
-export type JevClient = {
+export type EvaluatorClient = {
   modelPin: string;
   systemOne: (request: { state: JsonState | string; questions: Record<string, unknown>; model?: string }, options?: { signal?: AbortSignal }) => Promise<{
-    answers: JevAnswers;
+    answers: EvaluatorAnswers;
     model: string;
     usage: { input_tokens: number; output_tokens: number };
   }>;
-};
-
-export type JevFactory = (apiKey: string, settings: QaSettings) => JevClient;
-
-export const createJevClient: JevFactory = (apiKey, settings) => {
-  const client = new TypeSafeClient({
-    apiKey,
-    defaultModel: settings.jevModel,
-    logLevel: 'off',
-    timeout: settings.jevTimeoutMs,
-    dangerouslyAllowBrowser: false,
-  });
-  return {
-    modelPin: settings.jevModel,
-    systemOne: async (request, options) => {
-      const result = await client.systemOne(await protectOutboundData({
-        model: request.model ?? settings.jevModel,
-        state: request.state,
-        questions: request.questions as never,
-      }), options);
-      return { answers: result.answers as JevAnswers, model: result.model, usage: result.usage };
-    },
-  };
 };
 
 export type QaBatchSubject = {
@@ -47,7 +22,7 @@ export type QaBatchSubject = {
 };
 
 export type QaBatchResult = {
-  decisions: JevDecision[];
+  decisions: EvaluatorDecision[];
   modelActual?: string;
   error?: string;
   inputTokens: number;
@@ -60,9 +35,9 @@ const LABELS = {
   insufficient_evidence: 'The host evidence is insufficient or does not address the expected behavior.',
 } as const;
 
-/** One Jev request evaluates every test case and requirement after the QA agent has finished. */
+/** One Evaluator request evaluates every test case and requirement after the QA agent has finished. */
 export async function evaluateQaBatch(
-  client: JevClient,
+  client: EvaluatorClient,
   state: JsonState,
   subjects: readonly QaBatchSubject[],
   settings: QaSettings,
@@ -70,14 +45,14 @@ export async function evaluateQaBatch(
 ): Promise<QaBatchResult> {
   if (subjects.length === 0) return { decisions: [], inputTokens: 0, outputTokens: 0 };
   try {
-    const questions = Object.fromEntries(subjects.map(subject => [subject.key, choice(subject.prompt, LABELS)]));
+    const questions = Object.fromEntries(subjects.map(subject => [subject.key, { instructions: subject.prompt, criteria: LABELS }]));
     const result = await client.systemOne({ model: client.modelPin, state, questions }, { signal });
     return {
       decisions: subjects.map(subject => {
         const answer = result.answers[subject.key];
         const picked = answer?.choice;
         const confidence = answer?.confidence ?? 0;
-        const label: JevDecision['label'] = confidence < settings.confidenceThreshold
+        const label: EvaluatorDecision['label'] = confidence < settings.confidenceThreshold
           ? 'low_confidence'
           : picked === 'supports' || picked === 'contradicts' || picked === 'insufficient_evidence'
             ? picked

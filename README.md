@@ -35,10 +35,9 @@ The script builds `~/.pi/agent/builds/pi-qa`; add `builds/pi-qa` to the Pi packa
 | `/qa --base <ref>` | Add a local Git comparison base. Remotes are not fetched |
 | `/qa status` | Active or last run |
 | `/qa cancel` | Abort the active run; keep partial evidence |
-| `/qa setup` | Masked global TypeSafe key prompt inside Pi |
 | `/qa evaluate [runId]` | Re-score an unchanged snapshot with the active Pi model. Agents are not rerun |
 
-The TUI shows only test cases: expected behavior, source, status, procedure, observation, and host receipts. While QA runs, it streams the current tool/command, evaluation phase, elapsed time, and a short activity history so the UI never appears frozen. Jev, snapshots, agents, tokens, and internal criteria are not UI concepts.
+The TUI shows only test cases: expected behavior, source, status, procedure, observation, and host receipts. While QA runs, it streams the current tool/command, evaluation phase, elapsed time, and a short activity history so the UI never appears frozen. Snapshots, agents, tokens, and internal criteria are not UI concepts.
 
 ## What gets snapshotted
 
@@ -97,17 +96,13 @@ The QA session reuses the current Pi model authentication. No extra model API ke
 
 QA evaluates all provenance-verified test cases and requirements in a bounded
 request through Pi's public `ModelRuntime` SDK. It uses the selected model and
-inherits the session reasoning level. A separate TypeSafe key is not required.
+inherits the session reasoning level. It reuses Pi authentication.
 Deterministic checks validate execution receipts before the model assesses the
 behavior; missing or malformed decisions remain unverified.
 
-Jev does not choose a cheaper QA model or determine the default verdict. A custom
-evaluator can still be injected programmatically for explicit integrations.
-
-## TypeSafe key
-
-Normal `/qa` and `/qa evaluate` use Pi authentication and do not prompt for a
-TypeSafe key. `/qa setup` remains an explicit legacy credential-management action.
+The selected model evaluates evidence through Pi. There is no auxiliary classifier,
+cheaper model router, credential setup, or request-per-test fan-out. An explicit
+custom evaluator may be injected for offline tests or integrations.
 
 ## Verdict
 
@@ -129,11 +124,9 @@ Panel shortcut `p` copies a compact agent handoff containing only FAIL/BLOCKED c
 ```json
 {
   "qaModel": "provider/model-id",
-  "jevModel": "jev-1.13.0",
   "confidenceThreshold": 0.8,
-  "noulThreshold": 0.8,
   "timeoutMs": 600000,
-  "jevTimeoutMs": 30000
+  "evaluationTimeoutMs": 30000
 }
 ```
 
