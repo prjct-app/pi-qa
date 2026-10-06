@@ -11,7 +11,7 @@ npm run check:package
 
 Do not add `let` in `src/`. Do not store the TypeSafe key in files, logs, or reports. Automated tests must mock TypeSafe; do not make live paid API calls in CI.
 
-Pi packages stay peer dependencies. Use public Pi 0.85.1 APIs only.
+Pi packages stay peer dependencies. Use public Pi 1.0.4 APIs only.
 
 ## Runtime security audit
 

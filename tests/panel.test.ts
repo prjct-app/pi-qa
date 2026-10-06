@@ -8,7 +8,7 @@ import { createQaLiveModel } from '../src/progress.ts';
 import { qaPrompt } from '../src/export.ts';
 import { runQa } from '../src/orchestrate.ts';
 import { defaultSettings } from '../src/settings.ts';
-import { fakeJev, fakeRunner, memoryStore } from './fixtures/fakes.ts';
+import { fakeEvaluator, fakeRunner } from './fixtures/fakes.ts';
 import { gitRepo, writeWorktree } from './fixtures/git-repo.ts';
 
 test('pi-tui-kit panel shows only test cases and evidence', async () => {
@@ -20,10 +20,9 @@ test('pi-tui-kit panel shows only test cases and evidence', async () => {
       cwd: dir,
       intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
       model: { provider: 'fixture', id: 'offline' },
-      store: memoryStore('k'.repeat(20)),
       settings: defaultSettings(),
       runner: fakeRunner({ tester: { tests: [{ id: 'unit', command: 'npm test', cwd: '.', exitCode: 0, observed: 'pass', assertion: 'addition', contractItemIds: ['U1'] }], notes: '' } }),
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home,
       env: {},
     });
@@ -39,7 +38,7 @@ test('pi-tui-kit panel shows only test cases and evidence', async () => {
     const passRecord = {
       ...record,
       checks: record.checks.map(check => check.subjectId === 'unit' && (check.kind === 'test-definition' || check.kind === 'test-provenance') ? { ...check, ok: true } : check),
-      testJev: [{ subjectId: 'unit', question: 'test', label: 'supports', confidence: 0.99, model: 'jev-1.13.0', inputTokens: 0, outputTokens: 0 }],
+      testEvaluator: [{ subjectId: 'unit', question: 'test', label: 'supports', confidence: 0.99, model: 'fixture/active-model', inputTokens: 0, outputTokens: 0 }],
     } as typeof record;
     const passPrompt = qaPrompt(passRecord);
     assert.match(passPrompt, /no non-passing test cases/);

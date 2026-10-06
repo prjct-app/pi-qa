@@ -38,6 +38,17 @@ test('generic testing follow-up can recover the immediately preceding task excha
   assert.match(currentTaskText([message('user', 'implement PRJ-T315'), message('assistant', 'PRJ-T315 ready'), message('user', 'realiza las pruebas')]), /PRJ-T315/);
 });
 
+test('QA retains the original mission and corrections across generic follow-ups', async () => fixture(async dir => {
+  const host = harness(dir);
+  for (const content of ['Implement retry for GET only; never retry POST.', 'Correction: preserve Retry-After.', 'continúa', 'realiza las pruebas']) {
+    host.sessionManager.appendMessage({ role: 'user', content, timestamp: Date.now() });
+  }
+  const loaded = await loadIntent({ sessionManager: host.sessionManager, getSystemPrompt: () => '' }, dir);
+  assert.match(loaded.userRequest?.text ?? '', /GET only; never retry POST/);
+  assert.match(loaded.userRequest?.text ?? '', /preserve Retry-After/);
+  assert.match(loaded.userRequest?.text ?? '', /realiza las pruebas/);
+}));
+
 test('typed answer tool carries the current task reference, not unrelated tool results', () => {
   const text = currentTaskText([message('user', 'what task was worked on?'), { type: 'message', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'answer', arguments: { answer: 'PRJ-T315', refs: [{ path: '../docs/project/work/tasks/PRJ-T315.md' }] } }] } }]);
   assert.match(text, /PRJ-T315/);

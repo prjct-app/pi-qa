@@ -1,6 +1,6 @@
 import { deterministicChecks, testHasVerifiedExecution } from './evidence.ts';
-import { evaluateQaBatch, type JevClient, type JsonState, type QaBatchSubject } from './jev.ts';
-import type { CriterionEvaluation, EvaluationContract, ExecutionReceipt, JevDecision, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
+import { evaluateQaBatch, type EvaluatorClient, type JsonState, type QaBatchSubject } from './evaluator.ts';
+import type { CriterionEvaluation, EvaluationContract, ExecutionReceipt, EvaluatorDecision, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
 import type { QaSettings } from './settings.ts';
 import { clip } from './text.ts';
 import { behavioralTest } from './behavior.ts';
@@ -13,17 +13,17 @@ export async function evaluateEvidence(input: {
   reviewer: ReviewerReport;
   tester: TesterReport;
   executions?: ExecutionReceipt[];
-  client?: JevClient;
+  client?: EvaluatorClient;
   settings: QaSettings;
   signal?: AbortSignal;
 }): Promise<{
   criteria: CriterionEvaluation[];
-  findingJev: JevDecision[];
-  findingImpactJev: JevDecision[];
-  testJev: JevDecision[];
-  testFailureJev: JevDecision[];
+  findingEvaluator: EvaluatorDecision[];
+  findingImpactEvaluator: EvaluatorDecision[];
+  testEvaluator: EvaluatorDecision[];
+  testFailureEvaluator: EvaluatorDecision[];
   checks: ReturnType<typeof deterministicChecks>;
-  jev: { modelActual?: string; error?: string; inputTokens: number; outputTokens: number };
+  evaluator: { modelActual?: string; error?: string; inputTokens: number; outputTokens: number };
 }> {
   const checks = deterministicChecks(input.snapshot, { findings: [], notes: '', blockers: [] }, input.tester, input.executions);
   const tests = input.tester.tests.filter(test => !test.skipped && testHasVerifiedExecution(test, checks));
@@ -44,21 +44,21 @@ export async function evaluateEvidence(input: {
   const batch = input.client
     ? await evaluateQaBatch(input.client, state, subjects, input.settings, input.signal)
     : {
-        decisions: subjects.map(subject => unavailable(subject.subjectId, subject.question, input.settings.jevModel)),
+        decisions: subjects.map(subject => unavailable(subject.subjectId, subject.question, input.client?.modelPin ?? 'active-pi-model')),
         error: undefined,
         inputTokens: 0,
         outputTokens: 0,
       };
-  const testJev = batch.decisions.filter(decision => decision.question === 'test');
+  const testEvaluator = batch.decisions.filter(decision => decision.question === 'test');
   const criteria = input.contract.items.map(item => criterionResult(item, tests, batch.decisions));
   return {
     criteria,
-    findingJev: [],
-    findingImpactJev: [],
-    testJev,
-    testFailureJev: [],
+    findingEvaluator: [],
+    findingImpactEvaluator: [],
+    testEvaluator,
+    testFailureEvaluator: [],
     checks,
-    jev: {
+    evaluator: {
       modelActual: 'modelActual' in batch ? batch.modelActual : undefined,
       error: batch.error,
       inputTokens: batch.inputTokens,
@@ -96,7 +96,7 @@ const batchState = (contract: EvaluationContract, tests: TesterReport['tests'], 
 const criterionResult = (
   item: EvaluationContract['items'][number],
   tests: TesterReport['tests'],
-  decisions: JevDecision[],
+  decisions: EvaluatorDecision[],
 ): CriterionEvaluation => {
   const linked = tests.filter(test => behavioralTest(test) && test.contractItemIds.includes(item.id));
   const decision = decisions.find(value => value.question === 'criterion' && value.subjectId === item.id);
@@ -110,13 +110,13 @@ const criterionResult = (
     required: item.required,
     label,
     reason: reasonOf(decision),
-    jev: decision ? [decision] : [],
+    evaluator: decision ? [decision] : [],
     tests: linked.map(test => test.id),
     findings: [],
   };
 };
 
-const reasonOf = (decision: JevDecision | undefined): string => {
+const reasonOf = (decision: EvaluatorDecision | undefined): string => {
   if (!decision) return 'No evaluator decision was produced.';
   if (decision.label === 'timeout') return 'Evaluation timed out.';
   if (decision.label === 'low_confidence') return `Evaluator confidence ${decision.confidence} is below threshold.`;
@@ -126,7 +126,7 @@ const reasonOf = (decision: JevDecision | undefined): string => {
   return 'Evaluated test evidence is insufficient.';
 };
 
-const unavailable = (subjectId: string, question: string, model: string): JevDecision => ({
+const unavailable = (subjectId: string, question: string, model: string): EvaluatorDecision => ({
   subjectId, question, label: 'unavailable', confidence: 0, model, inputTokens: 0, outputTokens: 0,
 });
 

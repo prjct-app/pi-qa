@@ -5,26 +5,24 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@e
 import { brand, completer, openPanel } from '@prjct.app/pi-tui-kit';
 import { COMMAND, CONTRACT_TOOL, CUSTOM_RUN, CUSTOM_STATUS, EvaluationContractSchema, type QaRunRecord } from './schema.ts';
 import { loadIntent } from './context.ts';
-import { keyringStore, resolveKey, type SecretStore } from './credentials.ts';
 import { evaluateExisting, readLatest, runQa } from './orchestrate.ts';
 import { formatReport } from './report.ts';
-import { createJevClient, type JevFactory } from './jev.ts';
+import type { EvaluatorClient } from './evaluator.ts';
+import { selectQaModel } from './model.ts';
 import type { QaRunner } from './runner.ts';
 import type { GitExec } from './git.ts';
 import { agentHome, loadSettings, prjctHome, type QaSettings } from './settings.ts';
-import { configureEvaluator } from './command-setup.ts';
 import { checkContract } from './schema.ts';
 import { clip, plain } from './text.ts';
 import { qaLivePanelSpec } from './panel.ts';
 import { createQaLiveModel, type QaLiveModel } from './progress.ts';
-import { pickQaModel } from './route.ts';
 import { panelActions, present as presentRecord, registerQaRenderers } from './command-ui.ts';
 import { parseArgs, refersToThisExtension, findSelfTarget } from './command-target.ts';
+import { usesActiveTask } from './task-context.ts';
 
 export type QaDependencies = {
-  store?: SecretStore;
   runner?: QaRunner;
-  jevFactory?: JevFactory;
+  evaluator?: EvaluatorClient;
   git?: GitExec;
   settings?: QaSettings;
   home?: string;
@@ -39,14 +37,12 @@ type State = {
   active?: { runId: string; controller: AbortController; live?: QaLiveModel; done?: Promise<unknown> };
   lastRunId?: string;
   lastRecord?: QaRunRecord;
-  store?: SecretStore;
 };
 
 const ACTIONS = [
   { value: 'run', description: 'design and execute QA test cases' },
   { value: 'status', description: 'show the active or last QA run' },
   { value: 'cancel', description: 'cancel the active QA run' },
-  { value: 'setup', description: 'open the local TypeSafe key UI' },
   { value: 'evaluate', description: 're-evaluate captured evidence with the active Pi model' },
 ] as const;
 
@@ -76,17 +72,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
 
   registerQaRenderers(pi);
 
-  const configureGlobalEvaluator = async (ctx: ExtensionCommandContext): Promise<boolean> => configureEvaluator(ctx, {
-    store: await secrets(), settings: deps.settings ?? loadSettings(), jevFactory: deps.jevFactory ?? createJevClient, output,
-  });
-
   const present = (ctx: ExtensionCommandContext, record: QaRunRecord): void => presentRecord(ctx, record, output);
-
-  const secrets = async (): Promise<SecretStore> => {
-    if (deps.store) return deps.store;
-    if (!get().store) set({ store: await keyringStore() });
-    return get().store!;
-  };
 
   pi.registerCommand(COMMAND, {
     description: brand('execute QA and evaluate evidence with the active Pi model'),
@@ -115,10 +101,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
             output('QA session is closed.');
             return;
           }
-        if (parsed.action === 'setup') {
-          await configureGlobalEvaluator(ctx);
-          return;
-        }
         if (parsed.action === 'evaluate') {
           await runEvaluate(ctx, parsed.runId);
           return;
@@ -165,7 +147,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
       return;
     }
     const settings = deps.settings ?? loadSettings();
-    const store = await secrets();
     const availableModels = ctx.scopedModels?.length
       ? ctx.scopedModels.map(entry => entry.model)
       : ctx.modelRegistry?.getAvailable?.() ?? [];
@@ -181,18 +162,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     const runCwd = targetPath && targetStat?.isFile() ? dirname(targetPath) : targetPath ?? ctx.cwd;
     const targetPaths = targetPath ? [targetStat?.isFile() ? basename(targetPath) : '.'] : undefined;
     const targetMission = request ?? (targetPath ? `Evaluate the explicit target ${targetPath}.` : undefined);
-    const picked = await pickQaModel({
-      textModels,
-      current: ctx.model,
-      override: settings.qaModel,
-      routeEnabled: false,
-      mission: targetMission,
-      store,
-      env: deps.env ?? process.env,
-      settings,
-      jevFactory: deps.jevFactory,
-    });
-    const selectedModel = picked.model;
+    const selectedModel = selectQaModel(textModels, ctx.model, settings.qaModel);
     if (!selectedModel) {
       output('No authenticated model is available for the QA agent.');
       return;
@@ -207,7 +177,8 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     ctx.ui.setStatus?.('qa', request ? 'capturing QA target…' : 'capturing snapshot…');
     try {
       const context = await loadIntent(ctx, runCwd, targetMission);
-      const intent = targetMission ? { ...context, userRequest: { text: targetMission, ref: 'command:/qa' } } : context;
+      const intent = targetMission && !usesActiveTask(targetMission)
+        ? { ...context, userRequest: { text: targetMission, ref: 'command:/qa' } } : context;
       live.state.mission = intent.userRequest?.english ?? intent.userRequest?.text ?? 'Inspect the available target and identify what cannot be established.';
       const record = await runQa({
         cwd: runCwd,
@@ -218,10 +189,10 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
         thinkingLevel: ctx.thinkingLevel ?? pi.getThinkingLevel?.(),
         modelRegistry: ctx.modelRegistry,
         agentDir: agentHome(),
-        store,
+
         settings,
         runner: deps.runner,
-        jevFactory: deps.jevFactory,
+        evaluator: deps.evaluator,
         git: deps.git,
         env: deps.env,
         signal: controller.signal,
@@ -250,7 +221,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
   };
 
   const runEvaluate = async (ctx: ExtensionCommandContext, runId?: string) => {
-    const store = await secrets();
     const id = runId ?? get().lastRunId ?? await readLatest(deps.home ?? prjctHome());
     if (!id) {
       output('No captured snapshot. Starting a fresh QA run.');
@@ -263,9 +233,9 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
       model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : { provider: 'none', id: 'none' },
       thinkingLevel: ctx.thinkingLevel ?? pi.getThinkingLevel?.(),
       modelRegistry: ctx.modelRegistry,
-      store,
+
       settings: deps.settings ?? loadSettings(),
-      jevFactory: deps.jevFactory,
+      evaluator: deps.evaluator,
       git: deps.git,
       env: deps.env,
       home: deps.home ?? prjctHome(),

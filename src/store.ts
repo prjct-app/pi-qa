@@ -30,7 +30,26 @@ const writeJson = async (path: string, record: QaRunRecord): Promise<void> => {
 };
 
 export async function readRun(dir: string): Promise<QaRunRecord> {
-  return JSON.parse(await readFile(join(dir, 'report.json'), 'utf8')) as QaRunRecord;
+  return migrateStoredRun(JSON.parse(await readFile(join(dir, 'report.json'), 'utf8')));
+}
+
+/** Read historical reports without reviving the retired classifier integration. */
+export function migrateStoredRun(raw: Record<string, any>): QaRunRecord {
+  const { jev, findingJev, findingImpactJev, testJev, testFailureJev, ...record } = raw;
+  const { keyFingerprint: _fingerprint, credentialSource: _source, ...evaluator } = record.evaluator ?? jev ?? {};
+  return {
+    ...record,
+    evaluator,
+    criteria: (record.criteria ?? []).map((item: Record<string, any>) => {
+      const { jev: legacy, ...criterion } = item;
+      return { ...criterion, evaluator: criterion.evaluator ?? legacy ?? [] };
+    }),
+    findingEvaluator: record.findingEvaluator ?? findingJev,
+    findingImpactEvaluator: record.findingImpactEvaluator ?? findingImpactJev,
+    testEvaluator: record.testEvaluator ?? testJev,
+    testFailureEvaluator: record.testFailureEvaluator ?? testFailureJev,
+    recommendedActions: record.recommendedActions?.filter((action: { kind: string }) => !['setup_jev', 'setup_evaluator'].includes(action.kind)),
+  } as QaRunRecord;
 }
 
 export const runDirFor = (runId: string, home = prjctHome()): string => join(runsRoot(home), runId);

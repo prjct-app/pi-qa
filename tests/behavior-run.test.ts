@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { featureBranch, gitRepo, writeWorktree } from './fixtures/git-repo.ts';
-import { fakeJev, memoryStore } from './fixtures/fakes.ts';
+import { fakeEvaluator } from './fixtures/fakes.ts';
 import { auditedBash } from '../src/audited-bash.ts';
 import { runQa, evaluateExisting } from '../src/orchestrate.ts';
 import { loadIntent } from '../src/context.ts';
@@ -24,7 +24,7 @@ async function fixture(action: (dir: string, home: string) => Promise<void>): Pr
 test('even an all-supporting evaluator cannot PASS web QA with only a green developer suite', async () => fixture(async (dir, home) => {
   await writeWorktree(dir, 'package.json', JSON.stringify({ dependencies: { next: '16' } }));
   const result = await runQa({
-    cwd: dir, home, intent: mission, store: memoryStore('k'.repeat(20)), env: {}, jevFactory: fakeJev({ criterion: 'supports', test: 'supports' }),
+    cwd: dir, home, intent: mission, env: {}, evaluator: fakeEvaluator({ criterion: 'supports', test: 'supports' }),
     model: { provider: 'fixture', id: 'offline' }, signal: new AbortController().signal,
     runner: async input => {
       const receipts: ExecutionReceipt[] = [];
@@ -51,7 +51,7 @@ test('endpoint and invalid-input regression evidence comes from real requests, w
   const url = `http://127.0.0.1:${address.port}`;
   try {
     const result = await runQa({
-      cwd: dir, home, intent: mission, store: memoryStore('k'.repeat(20)), env: {}, jevFactory: fakeJev({ criterion: 'supports', test: 'supports' }),
+      cwd: dir, home, intent: mission, env: {}, evaluator: fakeEvaluator({ criterion: 'supports', test: 'supports' }),
       model: { provider: 'fixture', id: 'offline' }, signal: new AbortController().signal,
       runner: async input => {
         const receipts: ExecutionReceipt[] = [];
@@ -77,12 +77,12 @@ test('QA keeps the requested branch and invalidates a changed sibling ticket', a
     await writeWorktree(ticketDir, 'PRJ-T315.md', '# PRJ-T315\n## Acceptance Criteria\n- Public command accepts valid input\n');
     const host = harness(dir);
     const intent = await loadIntent({ sessionManager: host.sessionManager, getSystemPrompt: () => '' }, dir, ref);
-    const result = await runQa({ cwd: dir, home, intent, store: memoryStore(), env: {}, model: { provider: 'fixture', id: 'offline' }, signal: new AbortController().signal, runner: async () => ({ role: 'tester', status: 'completed', report: { tests: [], notes: 'blocked' }, latencyMs: 1 }) });
+    const result = await runQa({ cwd: dir, home, intent, env: {}, model: { provider: 'fixture', id: 'offline' }, signal: new AbortController().signal, runner: async () => ({ role: 'tester', status: 'completed', report: { tests: [], notes: 'blocked' }, latencyMs: 1 }) });
     assert.equal(result.contract.ticketRef, ref);
     assert.equal(result.snapshot.branch, 'feature/PRJ-T315-contract-check');
     assert.equal((await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim(), result.snapshot.branch);
     await writeWorktree(ticketDir, 'PRJ-T315.md', '# PRJ-T315\n## Acceptance Criteria\n- Changed outcome\n');
-    const reevaluated = await evaluateExisting(result.runId, { cwd: home, home, intent, store: memoryStore(), env: {}, model: { provider: 'fixture', id: 'offline' }, signal: new AbortController().signal });
+    const reevaluated = await evaluateExisting(result.runId, { cwd: home, home, intent, env: {}, model: { provider: 'fixture', id: 'offline' }, signal: new AbortController().signal });
     assert.equal(reevaluated.verdict, 'STALE');
   } finally { await rm(ticketDir, { recursive: true, force: true }); }
 }));

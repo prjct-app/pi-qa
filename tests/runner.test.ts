@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { runQa } from '../src/orchestrate.ts';
 import { reportTool, sdkRunner } from '../src/runner.ts';
 import { defaultSettings } from '../src/settings.ts';
-import { memoryStore } from './fixtures/fakes.ts';
 import { gitRepo, writeWorktree } from './fixtures/git-repo.ts';
 
 const fixture = fileURLToPath(new URL('./fixtures/mock-provider.ts', import.meta.url));
@@ -27,11 +26,10 @@ test('end-to-end Pi SDK session launches one QA agent and preserves the checkout
       intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
       model: { provider: 'qa-fixture', id: 'offline' },
       agentDir,
-      store: memoryStore(),
       settings: defaultSettings(),
       runner: sdkRunner,
       extensionPaths: [fixture],
-      onProgress: event => { if (event.kind === 'stage' || event.kind === 'jev') progress.push(event.message); },
+      onProgress: event => { if (event.kind === 'stage' || event.kind === 'evaluator') progress.push(event.message); },
       home: dest,
       env: {},
     });
