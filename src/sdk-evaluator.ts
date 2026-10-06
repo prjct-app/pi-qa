@@ -1,3 +1,4 @@
+import { protectOutboundData } from '@prjct.app/pi-secrets/privacy';
 import { ModelRuntime, type ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { JevClient, JevAnswers } from './jev.ts';
 import type { ThinkingLevel } from './runner.ts';
@@ -31,7 +32,7 @@ export const createSdkEvaluator = (options: Options): JevClient => ({
     const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs), ...(call?.signal ? [call.signal] : [])]);
     const message = await runtime.completeSimple(model, {
       systemPrompt: SYSTEM,
-      messages: [{ role: 'user', content: JSON.stringify({ evidence: request.state, questions: request.questions }), timestamp: Date.now() }],
+      messages: [{ role: 'user', content: JSON.stringify(await protectOutboundData({ evidence: request.state, questions: request.questions })), timestamp: Date.now() }],
     }, { reasoning: options.thinkingLevel === 'off' ? undefined : options.thinkingLevel ?? 'medium', maxTokens: Math.min(model.maxTokens, 32768), signal });
     if (message.stopReason === 'error' || message.stopReason === 'aborted') throw new Error(message.errorMessage || `Evaluation ${message.stopReason}.`);
     const text = message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n').trim();
