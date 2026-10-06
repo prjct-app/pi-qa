@@ -1,3 +1,4 @@
+import { protectOutboundData } from '@prjct.app/pi-secrets/privacy';
 import { TypeSafeClient, choice } from '@typesafe-ai/sdk';
 import type { JevDecision } from './schema.ts';
 import type { QaSettings } from './settings.ts';
@@ -28,11 +29,11 @@ export const createJevClient: JevFactory = (apiKey, settings) => {
   return {
     modelPin: settings.jevModel,
     systemOne: async (request, options) => {
-      const result = await client.systemOne({
+      const result = await client.systemOne(await protectOutboundData({
         model: request.model ?? settings.jevModel,
         state: request.state,
         questions: request.questions as never,
-      }, options);
+      }), options);
       return { answers: result.answers as JevAnswers, model: result.model, usage: result.usage };
     },
   };

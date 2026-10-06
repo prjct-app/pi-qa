@@ -19,11 +19,13 @@ test('QA evaluates through Pi on the inherited model and reasoning, retaining un
     },
   } as unknown as Pick<ModelRuntime, 'getModel' | 'completeSimple'>;
   const client = createSdkEvaluator({ model, thinkingLevel: 'high', timeoutMs: 1000, runtime: async () => runtime });
-  const result = await client.systemOne({ state: { output: 'CLI assertion passed' }, questions: {
+  const result = await client.systemOne({ state: { output: 'CLI assertion passed', contact: 'person@example.com' }, questions: {
     passed: 'Did the assertion pass?', missing: 'Was the UI tested?', invalid: 'Anything else?',
   } });
   assert.equal(calls.length, 1);
   assert.match(JSON.stringify(calls[0]), /CLI assertion passed/);
+  assert.ok(!JSON.stringify(calls[0]).includes('person@example.com'));
+  assert.ok(JSON.stringify(calls[0]).includes('p**********@****.com'));
   assert.equal(result.model, 'fixture/frontier');
   assert.equal(result.answers.passed?.choice, 'supports');
   assert.deepEqual(result.answers.missing, { choice: 'insufficient_evidence', confidence: 0 });
