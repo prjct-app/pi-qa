@@ -4,7 +4,7 @@
 
 Pi QA agent for code changes, tickets, deployed systems, smoke tests, artifacts, and other explicit evaluation targets.
 
-`/qa <mission>` launches one isolated QA agent that designs and executes test cases. Jev evaluates evidence internally. Results are `PASS`, `FAIL`, `NOT_VERIFIED`, or `STALE`.
+`/qa <mission>` launches one isolated QA agent that designs and executes test cases. The selected Pi model evaluates the captured evidence with the session reasoning level. Results are `PASS`, `FAIL`, `NOT_VERIFIED`, or `STALE`.
 
 ## Install
 
@@ -36,7 +36,7 @@ The script builds `~/.pi/agent/builds/pi-qa`; add `builds/pi-qa` to the Pi packa
 | `/qa status` | Active or last run |
 | `/qa cancel` | Abort the active run; keep partial evidence |
 | `/qa setup` | Masked global TypeSafe key prompt inside Pi |
-| `/qa evaluate [runId]` | Re-score an unchanged snapshot after configuring Jev. Agents are not rerun |
+| `/qa evaluate [runId]` | Re-score an unchanged snapshot with the active Pi model. Agents are not rerun |
 
 The TUI shows only test cases: expected behavior, source, status, procedure, observation, and host receipts. While QA runs, it streams the current tool/command, evaluation phase, elapsed time, and a short activity history so the UI never appears frozen. Jev, snapshots, agents, tokens, and internal criteria are not UI concepts.
 
@@ -93,25 +93,21 @@ A missing handshake within 10 seconds, a tool without a UI, or an unknown tool f
 
 The QA session reuses the current Pi model authentication. No extra model API key is needed.
 
-## Jev
+## Evidence evaluation
 
-Jev is the sole evaluator. It does not appear in the TUI, write test cases, pick commands, or decide the workflow. After the QA agent finishes, pi-qa sends one bounded `systemOne` request containing every provenance-verified test case and requirement. Jev returns `supports` / `contradicts` / `insufficient_evidence` for the whole batch.
+QA evaluates all provenance-verified test cases and requirements in a bounded
+request through Pi's public `ModelRuntime` SDK. It uses the selected model and
+inherits the session reasoning level. A separate TypeSafe key is not required.
+Deterministic checks validate execution receipts before the model assesses the
+behavior; missing or malformed decisions remain unverified.
 
-Default model pin: `jev-1.13.0` (`prjct-qa.json` → `jevModel`). There is no deterministic verdict fallback: missing credentials, low confidence, or timeout leaves cases `BLOCKED`. Deterministic code validates receipts before the single Jev request.
-
-After `/qa setup`, `/qa evaluate` scores the last snapshot if the fingerprint is unchanged.
+Jev does not choose a cheaper QA model or determine the default verdict. A custom
+evaluator can still be injected programmatically for explicit integrations.
 
 ## TypeSafe key
 
-Jev is an optional evaluator, not a precondition. `/qa` checks for the global key before starting and, when it is missing in TUI, opens the shared docked `openSecretPrompt` from `pi-tui-kit`, validates the embedded Jev client, and stores one credential for every project in the global OS keyring (`ai.typesafe` / `api-key`). Declining the prompt does not cancel the command: the run still designs test cases and captures evidence, reports `NOT_VERIFIED`, and says so up front. `/qa evaluate <runId>` scores that snapshot once a key exists, without re-running the agents.
-
-`/qa evaluate` is the one exception and still requires the key, because scoring a snapshot with Jev is the whole of what it does.
-
-The credential store, the record format and the keyring account live in `pi-tui-kit`, so a key saved here is the same key `pi-memory` reads. No HTTP server or browser is started. The legacy pi-qa entry migrates automatically. There is no plaintext-file fallback.
-
-`TYPESAFE_API_KEY` is valid for the process only and is not copied into the keyring.
-
-The key is never placed in URLs, logs, session transcripts, git files, browser storage, or QA reports. TypeSafe SDK debug logging is off.
+Normal `/qa` and `/qa evaluate` use Pi authentication and do not prompt for a
+TypeSafe key. `/qa setup` remains an explicit legacy credential-management action.
 
 ## Verdict
 
@@ -148,7 +144,7 @@ Panel shortcut `p` copies a compact agent handoff containing only FAIL/BLOCKED c
 - Tester `bash` is not a sandbox. Isolation is the extra worktree plus a prompt; a determined command could still touch the original tree.
 - Dependency trees (`node_modules`, `vendor`) are copied into the isolated workspace, never linked, so tester writes cannot reach the user's checkout. Copies are capped at 60,000 files / 2 GiB; beyond the budget the tester must install dependencies itself.
 - The current browser driver uses an installed Chrome, Chromium, or Edge through `playwright-core`; it does not download a browser. If none exists, browser coverage is `NOT_VERIFIED` with the missing capability.
-- Screenshots are sent to the vision-capable tester and stored with SHA-256, but Jev accepts text only; every visual claim still requires a textual DOM/behavior observation.
+- Screenshots are sent to the vision-capable tester and stored with SHA-256, the evaluation batch uses text evidence; every visual claim still requires a textual DOM/behavior observation.
 - `pi-memory`, Linear, and Jira are optional. A memory entry is never proof that the current target passed.
 - Calibrate thresholds against labeled examples before treating them as final.
-- A failed command alone is not a product verdict. Without Jev-substantiated product evidence it remains `NOT_VERIFIED` and produces a diagnostic next action.
+- A failed command alone is not a product verdict. Without substantiated product evidence it remains `NOT_VERIFIED` and produces a diagnostic next action.

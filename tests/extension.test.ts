@@ -53,7 +53,7 @@ for (const mode of ['tui', 'rpc'] as const) {
   });
 }
 
-test('/qa still runs without a global evaluator and says why there is no verdict', async () => {
+test('/qa uses Pi without asking for a separate evaluator credential', async () => {
   const dir = await gitRepo();
   const dest = await mkdtemp(join(tmpdir(), 'qa-preflight-'));
   const launched: string[] = [];
@@ -67,8 +67,7 @@ test('/qa still runs without a global evaluator and says why there is no verdict
   try {
     await host.command('smoke test this extension');
     assert.ok(launched.length > 0, 'the QA agents ran instead of the command refusing to start');
-    assert.ok(host.notices.some(text => /cannot reach a verdict/i.test(text)));
-    assert.ok(host.notices.some(text => /\/qa evaluate/i.test(text)));
+    assert.equal(host.notices.some(text => /add a key|cannot reach a verdict/i.test(text)), false);
   } finally {
     await host.emit('session_shutdown');
     await rm(dir, { recursive: true, force: true });
