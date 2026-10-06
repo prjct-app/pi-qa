@@ -1,3 +1,7 @@
+## 0.7.7 (2026-10-06)
+
+- Update MCP client to 2.3.1 to fix the credential-disclosure advisory.
+
 ## 0.7.6 (2026-10-06)
 
 - Protect direct SDK and optional Jev requests with the published pi-secrets outbound guard.
