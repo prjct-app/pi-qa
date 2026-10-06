@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.5 — 2026-10-06
+
+- Evaluate execution evidence with the selected Pi model and inherited reasoning through the public SDK. Reuse parent providers; remove automatic TypeSafe routing and credential requirements.
+
 ## Unreleased
 
 - QA runs on the session's model and thinking level instead of the smallest available model with thinking off. `qaModel` still overrides the model.

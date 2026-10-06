@@ -1,7 +1,7 @@
 {
   "name": "@prjct.app/pi-qa",
-  "version": "0.7.4",
-  "description": "Run an isolated QA agent in PI Agent, capture auditable test evidence, and evaluate explicit targets with Jev-backed verdicts.",
+  "version": "0.7.5",
+  "description": "Run an isolated QA agent in PI Agent, capture auditable execution evidence, and evaluate explicit targets with the selected Pi model.",
   "type": "module",
   "license": "MIT",
   "keywords": [

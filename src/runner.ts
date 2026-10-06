@@ -98,6 +98,7 @@ export const sdkRunner: QaRunner = async input => {
   const model = session.modelRuntime.getModel(input.model.provider, input.model.id);
   if (!model) throw new Error(`Child model ${input.model.provider}/${input.model.id} is unavailable. The QA agents use the parent Pi authentication.`);
   await session.setModel(model);
+  session.setThinkingLevel(input.thinkingLevel ?? 'medium');
   const timer = AbortSignal.timeout(input.timeoutMs);
   const signal = AbortSignal.any([input.signal, timer]);
   const onAbort = () => { void session.abort(); };

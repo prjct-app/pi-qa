@@ -47,7 +47,7 @@ const ACTIONS = [
   { value: 'status', description: 'show the active or last QA run' },
   { value: 'cancel', description: 'cancel the active QA run' },
   { value: 'setup', description: 'open the local TypeSafe key UI' },
-  { value: 'evaluate', description: 're-evaluate a captured snapshot with Jev (no agent rerun)' },
+  { value: 'evaluate', description: 're-evaluate captured evidence with the active Pi model' },
 ] as const;
 
 const OUTPUT_LIMIT = 16_384;
@@ -89,7 +89,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
   };
 
   pi.registerCommand(COMMAND, {
-    description: brand('evaluate any QA target with two Pi agents and Jev'),
+    description: brand('execute QA and evaluate evidence with the active Pi model'),
     getArgumentCompletions: completer([...ACTIONS, { value: '--base', description: 'local git ref to diff against when the tree is clean' }]),
     handler: async (args, ctx) => {
       ctxSlot.command = ctx;
@@ -166,19 +166,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     }
     const settings = deps.settings ?? loadSettings();
     const store = await secrets();
-    const credential = await resolveKey(store, deps.env);
-    if (credential.state !== 'usable') {
-      // Jev is an optional evaluator, not a precondition for QA. A run without
-      // it still designs test cases and captures evidence, and /qa evaluate
-      // scores that snapshot afterwards without re-running the agents, so
-      // refusing to start only threw the work away. The cost is stated up
-      // front rather than discovered at the verdict.
-      const configured = credential.state === 'missing' && ctx.mode === 'tui' && ctx.hasUI
-        && await configureGlobalEvaluator(ctx);
-      if (!configured) {
-        output(`${credential.detail} This run captures test cases and evidence but cannot reach a verdict; add a key, then re-score it with /qa evaluate.`);
-      }
-    }
     const availableModels = ctx.scopedModels?.length
       ? ctx.scopedModels.map(entry => entry.model)
       : ctx.modelRegistry?.getAvailable?.() ?? [];
@@ -198,12 +185,12 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
       textModels,
       current: ctx.model,
       override: settings.qaModel,
-      routeEnabled: settings.routeModels,
+      routeEnabled: false,
       mission: targetMission,
       store,
       env: deps.env ?? process.env,
       settings,
-      jevFactory: deps.jevFactory ?? createJevClient,
+      jevFactory: deps.jevFactory,
     });
     const selectedModel = picked.model;
     if (!selectedModel) {
@@ -229,11 +216,12 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
         base,
         model,
         thinkingLevel: ctx.thinkingLevel ?? pi.getThinkingLevel?.(),
+        modelRegistry: ctx.modelRegistry,
         agentDir: agentHome(),
         store,
         settings,
         runner: deps.runner,
-        jevFactory: deps.jevFactory ?? createJevClient,
+        jevFactory: deps.jevFactory,
         git: deps.git,
         env: deps.env,
         signal: controller.signal,
@@ -263,18 +251,6 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
 
   const runEvaluate = async (ctx: ExtensionCommandContext, runId?: string) => {
     const store = await secrets();
-    const credential = await resolveKey(store, deps.env);
-    if (credential.state !== 'usable') {
-      // Unlike /qa, this command exists only to score a captured snapshot with
-      // Jev. Without a key there is nothing for it to do, so saying so beats
-      // re-reading the snapshot to produce the same NOT_VERIFIED it already has.
-      if (credential.state === 'missing') {
-        if (!(await configureGlobalEvaluator(ctx))) return;
-      } else {
-        output(`${credential.detail} Replace it with /qa setup.`, 'error');
-        return;
-      }
-    }
     const id = runId ?? get().lastRunId ?? await readLatest(deps.home ?? prjctHome());
     if (!id) {
       output('No captured snapshot. Starting a fresh QA run.');
@@ -285,9 +261,11 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
       cwd: ctx.cwd,
       intent: {},
       model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : { provider: 'none', id: 'none' },
+      thinkingLevel: ctx.thinkingLevel ?? pi.getThinkingLevel?.(),
+      modelRegistry: ctx.modelRegistry,
       store,
       settings: deps.settings ?? loadSettings(),
-      jevFactory: deps.jevFactory ?? createJevClient,
+      jevFactory: deps.jevFactory,
       git: deps.git,
       env: deps.env,
       home: deps.home ?? prjctHome(),
