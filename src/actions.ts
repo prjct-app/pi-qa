@@ -3,7 +3,7 @@ import type { EvaluationContract, QaRecommendedAction, QaVerdict } from './schem
 export const recommendedActions = (input: {
   verdict: QaVerdict;
   contract: EvaluationContract;
-  jevAvailable: boolean;
+  evaluatorAvailable: boolean;
   nextVerification: string;
 }): QaRecommendedAction[] => {
   const copy = action('copy_prompt', 'Copy non-passing cases', 'Copy a compact agent handoff containing only FAIL/BLOCKED cases and their host evidence.', false);
@@ -19,8 +19,7 @@ export const recommendedActions = (input: {
     action('rerun', 'Re-run after fix', 'Capture a new target and verify the correction.', false),
   ];
   return [
-    ...(!input.jevAvailable ? [action('setup_jev', 'Configure Jev', 'Semantic evidence could not be verified.', true)] : []),
-    action('request_input', 'Resolve missing verification', input.nextVerification, input.jevAvailable),
+    action('request_input', 'Resolve missing verification', input.nextVerification, true),
     ...ticket,
     copy,
     exportAction,

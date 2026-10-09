@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { getCurrentTools, type AssistantMessage } from '@earendil-works/pi-ai';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/compat';
 
 import { REVIEWER_REPORT_TOOL, TESTER_REPORT_TOOL } from '../../src/schema.ts';
@@ -29,7 +30,7 @@ export default function toolsSpyFixture(pi: ExtensionAPI): void {
     }],
     streamSimple(model, context, options) {
       const target = process.env.PI_QA_TOOLS_SPY_FILE;
-      const names = (context.tools ?? []).map(tool => tool.name);
+      const names = getCurrentTools(context.messages).map(tool => tool.name);
       if (target) {
         const hasReviewer = names.includes(REVIEWER_REPORT_TOOL);
         const hasTester = names.includes(TESTER_REPORT_TOOL);
@@ -42,7 +43,7 @@ export default function toolsSpyFixture(pi: ExtensionAPI): void {
       }
 
       const stream = createAssistantMessageEventStream();
-      const message: any = {
+      const message: AssistantMessage = {
         role: 'assistant',
         content: [],
         api: model.api,

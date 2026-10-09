@@ -1,9 +1,10 @@
 import { writeFile } from 'node:fs/promises';
+import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { join } from 'node:path';
 import { deriveContract, fingerprintText, sanitizeContract, ticketStale, type IntentContext } from './contract.ts';
-import { markKeyRejected, resolveKey, type SecretStore } from './credentials.ts';
 import { evaluateEvidence } from './evaluate.ts';
-import { createJevClient, type JevFactory } from './jev.ts';
+import type { EvaluatorClient } from './evaluator.ts';
+import { createSdkEvaluator } from './sdk-evaluator.ts';
 import { formatReport } from './report.ts';
 import { sdkRunner, type QaRunner, type ThinkingLevel } from './runner.ts';
 import type { EvaluationContract, QaRunRecord, ReviewerReport, TesterReport } from './schema.ts';
@@ -28,11 +29,11 @@ export type OrchestrateInput = {
   base?: string;
   model: { provider: string; id: string };
   thinkingLevel?: ThinkingLevel;
+  modelRegistry?: Pick<ModelRegistry, 'find' | 'streamSimple'>;
   agentDir?: string;
-  store: SecretStore;
   settings?: QaSettings;
   runner?: QaRunner;
-  jevFactory?: JevFactory;
+  evaluator?: EvaluatorClient;
   git?: GitExec;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
@@ -122,7 +123,7 @@ export async function evaluateExisting(runId: string, input: Omit<OrchestrateInp
       stale: true,
       explanation: 'The snapshot changed. Evaluation of the previous run does not apply.',
       nextVerification: 'Run /qa again.',
-      recommendedActions: recommendedActions({ verdict: 'STALE', contract: record.contract, jevAvailable: record.jev.available, nextVerification: 'Run /qa again.' }),
+      recommendedActions: recommendedActions({ verdict: 'STALE', contract: record.contract, evaluatorAvailable: record.evaluator.available, nextVerification: 'Run /qa again.' }),
     };
     await writeEval(join((input.home ?? prjctHome()), 'pi-qa', 'runs', runId), next);
     input.onProgress?.({ kind: 'complete', record: next });
@@ -185,11 +186,10 @@ const finish = async (args: {
   contractProblems?: string[];
   workspaceNotes?: string[];
 }): Promise<QaRunRecord> => {
-  args.input.onProgress?.({ kind: 'stage', stage: 'jev', message: 'Evaluating all test cases in one batch…' });
-  args.input.onProgress?.({ kind: 'jev', status: 'running', message: 'Evaluating all test cases in one batch…' });
-  const resolved = await resolveKey(args.input.store, args.input.env);
-  const client = resolved.key ? (args.input.jevFactory ?? createJevClient)(resolved.key, args.settings) : undefined;
-  const jevStarted = Date.now();
+  args.input.onProgress?.({ kind: 'stage', stage: 'evaluator', message: 'Evaluating all test cases in one batch…' });
+  args.input.onProgress?.({ kind: 'evaluator', status: 'running', message: 'Evaluating all test cases in one batch…' });
+  const client = args.input.evaluator ?? createSdkEvaluator({ model: args.input.model, thinkingLevel: args.input.thinkingLevel, timeoutMs: args.settings.evaluationTimeoutMs, registry: args.input.modelRegistry });
+  const evaluatorStarted = Date.now();
   const evaluated = await evaluateEvidence({
     snapshot: args.captured.snapshot,
     blobs: args.captured.blobs,
@@ -201,11 +201,9 @@ const finish = async (args: {
     settings: args.settings,
     signal: args.input.signal,
   });
-  const decisions = [...evaluated.testJev, ...evaluated.criteria.flatMap(item => item.jev)];
-  const jevAvailable = Boolean(client) && decisions.length > 0 && decisions.every(decision => decision.label !== 'unavailable' && decision.label !== 'timeout');
-  const authenticationRejected = decisions.some(decision => /\b401\b|cannot authenticate|authenticationerror/i.test(decision.error ?? ''));
-  if (authenticationRejected && resolved.source === 'keyring' && resolved.key) await markKeyRejected(args.input.store, resolved.key).catch(() => undefined);
-  args.input.onProgress?.({ kind: 'jev', status: jevAvailable ? 'completed' : 'unavailable', message: jevAvailable ? 'Test-case evaluation complete.' : evaluated.jev.error ?? 'Test-case evaluation unavailable.' });
+  const decisions = [...evaluated.testEvaluator, ...evaluated.criteria.flatMap(item => item.evaluator)];
+  const evaluatorAvailable = Boolean(client) && decisions.length > 0 && decisions.every(decision => decision.label !== 'unavailable' && decision.label !== 'timeout');
+  args.input.onProgress?.({ kind: 'evaluator', status: evaluatorAvailable ? 'completed' : 'unavailable', message: evaluatorAvailable ? 'Test-case evaluation complete.' : evaluated.evaluator.error ?? 'Test-case evaluation unavailable.' });
   const decided = decideVerdict({
     contract: args.contract,
     snapshot: args.captured.snapshot,
@@ -215,14 +213,14 @@ const finish = async (args: {
     tester: args.tester,
     reviewerReport: args.reviewerReport,
     testerReport: args.testerReport,
-    findingJev: [],
-    findingImpactJev: [],
-    testJev: evaluated.testJev,
-    testFailureJev: [],
+    findingEvaluator: [],
+    findingImpactEvaluator: [],
+    testEvaluator: evaluated.testEvaluator,
+    testFailureEvaluator: [],
     stale: args.stale,
-    jevAvailable,
-    evaluatorConfigured: Boolean(resolved.key),
-    evaluatorError: evaluated.jev.error,
+    evaluatorAvailable,
+    evaluatorConfigured: Boolean(client),
+    evaluatorError: evaluated.evaluator.error,
     snapshotError: args.captured.snapshot.resolutionError,
   });
   const record: QaRunRecord = {
@@ -237,25 +235,23 @@ const finish = async (args: {
     agents: { reviewer: args.reviewer, tester: args.tester },
     checks: evaluated.checks,
     criteria: evaluated.criteria,
-    jev: {
-      configured: Boolean(resolved.key),
-      modelPin: args.settings.jevModel,
-      modelActual: evaluated.jev.modelActual,
-      available: jevAvailable,
-      error: evaluated.jev.error,
-      keyFingerprint: resolved.fingerprint,
-      credentialSource: resolved.source,
-      inputTokens: evaluated.jev.inputTokens,
-      outputTokens: evaluated.jev.outputTokens,
-      latencyMs: Date.now() - jevStarted,
+    evaluator: {
+      configured: Boolean(client),
+      modelPin: client?.modelPin ?? `${args.input.model.provider}/${args.input.model.id}`,
+      modelActual: evaluated.evaluator.modelActual,
+      available: evaluatorAvailable,
+      error: evaluated.evaluator.error,
+      inputTokens: evaluated.evaluator.inputTokens,
+      outputTokens: evaluated.evaluator.outputTokens,
+      latencyMs: Date.now() - evaluatorStarted,
     },
     unresolvedRisks: [...decided.unresolvedRisks, ...args.workspaceNotes ?? []],
     contractProblems: args.contractProblems?.length ? args.contractProblems : undefined,
-    recommendedActions: recommendedActions({ verdict: decided.verdict, contract: args.contract, jevAvailable, nextVerification: decided.nextVerification }),
-    findingJev: [],
-    findingImpactJev: [],
-    testJev: evaluated.testJev,
-    testFailureJev: [],
+    recommendedActions: recommendedActions({ verdict: decided.verdict, contract: args.contract, evaluatorAvailable, nextVerification: decided.nextVerification }),
+    findingEvaluator: [],
+    findingImpactEvaluator: [],
+    testEvaluator: evaluated.testEvaluator,
+    testFailureEvaluator: [],
     stale: args.stale,
     latencyMs: Date.now() - args.started,
   };

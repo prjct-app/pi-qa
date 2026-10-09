@@ -4,11 +4,11 @@ export type QaProgressEvent =
   | { kind: 'stage'; stage: QaStage; message: string }
   | { kind: 'snapshot'; fingerprint: string; paths: number }
   | { kind: 'agent'; role: AgentRole; status: 'running' | AgentOutcome['status']; latencyMs?: number; error?: string }
-  | { kind: 'jev'; status: 'running' | 'completed' | 'unavailable'; message: string }
+  | { kind: 'evaluator'; status: 'running' | 'completed' | 'unavailable'; message: string }
   | { kind: 'complete'; record: QaRunRecord }
   | { kind: 'error'; message: string };
 
-export type QaStage = 'starting' | 'capturing' | 'materializing' | 'agents' | 'staleness' | 'jev' | 'persisting' | 'complete' | 'failed';
+export type QaStage = 'starting' | 'capturing' | 'materializing' | 'agents' | 'staleness' | 'evaluator' | 'persisting' | 'complete' | 'failed';
 export type LiveStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'timed_out' | 'unavailable';
 
 export type QaLiveState = {
@@ -19,7 +19,7 @@ export type QaLiveState = {
   message: string;
   snapshot?: { fingerprint: string; paths: number };
   agents: Record<AgentRole, { status: LiveStatus; latencyMs?: number; error?: string }>;
-  jev: { status: LiveStatus; message?: string };
+  evaluator: { status: LiveStatus; message?: string };
   record?: QaRunRecord;
   error?: string;
   activity: string[];
@@ -39,7 +39,7 @@ export const createQaLiveModel = (runId: string, mission: string): QaLiveModel =
     stage: 'starting',
     message: 'Preparing QA run…',
     agents: { reviewer: { status: 'pending' }, tester: { status: 'pending' } },
-    jev: { status: 'pending' },
+    evaluator: { status: 'pending' },
     activity: ['Preparing QA run…'],
   };
   const listeners = new Set<() => void>();
@@ -51,10 +51,10 @@ export const createQaLiveModel = (runId: string, mission: string): QaLiveModel =
       state.activity = [...state.activity, event.message].slice(-8);
     } else if (event.kind === 'snapshot') state.snapshot = { fingerprint: event.fingerprint, paths: event.paths };
     else if (event.kind === 'agent') state.agents[event.role] = { status: event.status === 'timeout' ? 'timed_out' : event.status, latencyMs: event.latencyMs, error: event.error };
-    else if (event.kind === 'jev') {
-      state.stage = 'jev';
+    else if (event.kind === 'evaluator') {
+      state.stage = 'evaluator';
       state.message = event.status === 'running' ? 'Evaluating all test cases…' : event.message;
-      state.jev = { status: event.status, message: event.message };
+      state.evaluator = { status: event.status, message: event.message };
       state.activity = [...state.activity, state.message].slice(-8);
     }
     else if (event.kind === 'complete') {

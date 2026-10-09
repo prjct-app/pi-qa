@@ -1,6 +1,20 @@
 import { git, type GitExec } from './git.ts';
 
-export type ContextEntry = { type?: string; message?: unknown };
+export type ContextEntry = { type?: string; message?: unknown; summary?: string };
+
+/** Preserve author intent; selecting which requirements still apply belongs to the model. */
+export function userRequestHistory(entries: readonly ContextEntry[]): string | undefined {
+  const compactedAt = entries.findLastIndex(entry => entry.type === 'compaction');
+  const summary = compactedAt >= 0 ? entries[compactedAt]?.summary : undefined;
+  const requests = entries.slice(compactedAt + 1).flatMap(entry => entry.type === 'message'
+    && object(entry.message) && entry.message.role === 'user' ? [contentText(entry.message.content)] : []).filter(Boolean);
+  if (!summary && requests.length <= 1) return requests[0];
+  return [
+    'User request history in chronological order. Preserve the original mission and added constraints; later explicit corrections or task replacements take precedence. Generic status or testing requests do not erase prior requirements.',
+    ...(summary ? [`Prior compacted context (verify claims against execution evidence):\n${summary}`] : []),
+    ...requests.map((text, index) => `User message ${index + 1}:\n${text}`),
+  ].join('\n\n');
+}
 
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object';

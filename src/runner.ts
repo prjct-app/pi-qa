@@ -1,4 +1,5 @@
-import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, type ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { protectOutboundData, maskSensitiveData } from '@prjct.app/pi-secrets/privacy';
 import {
   AGENT_ROLES,
   checkReviewerReport,
@@ -45,6 +46,22 @@ export type QaRunner = (input: RunnerInput) => Promise<AgentOutcome>;
 
 const READ_ONLY = ['read', 'grep', 'find', 'ls'] as const;
 
+/** Isolated QA sessions also guard data discovered by their tools. */
+export function installQaPrivacy(pi: ExtensionAPI): void {
+  const protect = async <T>(value: T, ctx: ExtensionContext): Promise<T> => {
+    try { return await protectOutboundData(value); }
+    catch (error) { ctx.abort(); throw error; }
+  };
+  pi.on('context', async (event, ctx) => {
+    try { return { messages: await protect(event.messages, ctx) }; }
+    catch { return { messages: maskSensitiveData(event.messages) }; }
+  });
+  pi.on('before_provider_request', async (event, ctx) => {
+    try { return await protect(event.payload, ctx); }
+    catch { return maskSensitiveData(event.payload); }
+  });
+}
+
 /**
  * Build the active tool allowlist passed to `createAgentSession` for a role.
  * The browser tool is only added when the runner actually has a browser instance;
@@ -76,6 +93,7 @@ export const sdkRunner: QaRunner = async input => {
     noThemes: true,
     noContextFiles: true,
     additionalExtensionPaths: input.extensionPaths ?? [],
+    extensionFactories: [installQaPrivacy],
     systemPromptOverride: () => input.role === 'reviewer'
       ? reviewerPrompt(input.snapshot, input.contract, input.settings)
       : testerPrompt(input.snapshot, input.contract, input.settings, input.briefing),
@@ -95,14 +113,16 @@ export const sdkRunner: QaRunner = async input => {
     if (event.type === 'tool_execution_start') input.onProgress?.(toolActivity(event.toolName, event.args));
     if (event.type === 'tool_execution_end') input.onProgress?.(`${event.toolName === TESTER_REPORT_TOOL ? 'Test cases finalized' : `${event.toolName} completed`}${event.isError ? ' with an error' : ''}.`);
   });
-  const model = session.modelRuntime.getModel(input.model.provider, input.model.id);
-  if (!model) throw new Error(`Child model ${input.model.provider}/${input.model.id} is unavailable. The QA agents use the parent Pi authentication.`);
-  await session.setModel(model);
   const timer = AbortSignal.timeout(input.timeoutMs);
   const signal = AbortSignal.any([input.signal, timer]);
   const onAbort = () => { void session.abort(); };
   signal.addEventListener('abort', onAbort, { once: true });
   try {
+    await session.bindExtensions({ mode: 'rpc', onError: error => { reportSlot.error = String(error.error); void session.abort(); } });
+    const model = session.modelRuntime.getModel(input.model.provider, input.model.id);
+    if (!model) throw new Error(`Child model ${input.model.provider}/${input.model.id} is unavailable. The QA agents use the parent Pi authentication.`);
+    await session.setModel(model);
+    session.setThinkingLevel(input.thinkingLevel ?? 'medium');
     await session.prompt('Evaluate the snapshot against the contract and submit your report.');
     if (!reportSlot.report && !signal.aborted) {
       await session.prompt('Submit the structured report tool now. Do not continue investigating.');

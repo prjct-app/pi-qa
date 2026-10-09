@@ -2,12 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-export type ParsedArgs = { action: 'run' | 'status' | 'cancel' | 'setup' | 'evaluate'; base?: string; target?: string; runId?: string; request?: string };
+export type ParsedArgs = { action: 'run' | 'status' | 'cancel' | 'evaluate'; base?: string; target?: string; runId?: string; request?: string };
 
 export const parseArgs = (args: string): ParsedArgs => {
   const tokens = (args.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map(token => token.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2')).filter(Boolean);
   const exact = tokens.join(' ');
-  if (exact === 'status' || exact === 'cancel' || exact === 'setup') return { action: exact };
+  if (exact === 'status' || exact === 'cancel') return { action: exact };
   if (tokens[0] === 'evaluate' && (tokens.length === 1 || (tokens.length === 2 && UUID.test(tokens[1] ?? '')))) {
     return { action: 'evaluate', runId: tokens[1] };
   }

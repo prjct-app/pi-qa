@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { evaluateExisting, runQa } from '../src/orchestrate.ts';
 import { defaultSettings } from '../src/settings.ts';
-import { fakeJev, fakeRunner, memoryStore, trackingRunner } from './fixtures/fakes.ts';
+import { fakeEvaluator, fakeRunner, trackingRunner } from './fixtures/fakes.ts';
 import { gitRepo, writeWorktree } from './fixtures/git-repo.ts';
 import type { ReviewerReport, TesterReport } from '../src/schema.ts';
 
@@ -26,8 +26,8 @@ test('launches exactly one QA agent against the snapshot', async () => {
   try {
     const record = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, runner: tracked.runner, jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      model: { provider: 'fixture', id: 'offline' },
+      settings, runner: tracked.runner, evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {},
     });
     assert.deepEqual(tracked.launched, ['tester']);
@@ -47,12 +47,12 @@ test('green but irrelevant tests yield NOT_VERIFIED', async () => {
   try {
     const record = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, runner: fakeRunner({ tester }), jevFactory: fakeJev({ criterion: 'supports', relevant: false }),
+      model: { provider: 'fixture', id: 'offline' },
+      settings, runner: fakeRunner({ tester }), evaluator: fakeEvaluator({ criterion: 'supports', relevant: false }),
       home: dest, env: {},
     });
     assert.equal(record.verdict, 'NOT_VERIFIED');
-    assert.match(record.explanation, /not assert|insufficient|Jev|intent|evidence|Green exits/i);
+    assert.match(record.explanation, /not assert|insufficient|Evaluator|intent|evidence|Green exits/i);
   } finally {
     await rm(dir, { recursive: true, force: true });
     await rm(dest, { recursive: true, force: true });
@@ -73,9 +73,9 @@ test('a required behavior contradicted by test evidence is FAIL', async () => {
   try {
     const record = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
+      model: { provider: 'fixture', id: 'offline' },
       settings, runner: fakeRunner({ reviewer, tester }),
-      jevFactory: fakeJev({ finding: 'supports', criterion: 'contradicts', relevant: true }),
+      evaluator: fakeEvaluator({ finding: 'supports', criterion: 'contradicts', relevant: true }),
       home: dest, env: {},
     });
     assert.equal(record.verdict, 'FAIL');
@@ -91,8 +91,8 @@ test('no ticket is allowed and does not by itself cause PASS', async () => {
   try {
     const record = await runQa({
       cwd: dir, intent: {},
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, runner: fakeRunner({}), jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      model: { provider: 'fixture', id: 'offline' },
+      settings, runner: fakeRunner({}), evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {},
     });
     assert.ok(record.contract.items.every(item => item.source === 'inferred_from_diff' || item.required === false) || record.verdict !== 'PASS');
@@ -109,13 +109,13 @@ test('a changing diff marks the run STALE', async () => {
   try {
     const record = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
+      model: { provider: 'fixture', id: 'offline' },
       settings,
       runner: async input => {
         await writeWorktree(dir, 'src.js', 'export const add = (a, b) => a + b + 1;\n');
         return fakeRunner({})(input);
       },
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {},
     });
     assert.equal(record.verdict, 'STALE');
@@ -133,9 +133,9 @@ test('QA agent failure is NOT_VERIFIED', async () => {
   try {
     const record = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
+      model: { provider: 'fixture', id: 'offline' },
       settings, runner: fakeRunner({ reviewer, fail: 'tester' }),
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {},
     });
     assert.equal(record.agents.reviewer.status, 'completed');
@@ -148,20 +148,20 @@ test('QA agent failure is NOT_VERIFIED', async () => {
   }
 });
 
-test('missing semantic evaluator preserves test evidence without exposing Jev in UX', async () => {
+test('unavailable Pi evaluation model preserves test evidence and reports the connection failure', async () => {
   const dir = await subtractDiff();
   const dest = await home();
   try {
     const record = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore(),
-      settings, runner: fakeRunner({}), jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      model: { provider: 'fixture', id: 'offline' },
+      settings, runner: fakeRunner({}),
       home: dest, env: {},
     });
-    assert.equal(record.jev.configured, false);
+    assert.equal(record.evaluator.configured, true);
     assert.equal(record.verdict, 'NOT_VERIFIED');
-    assert.match(record.explanation, /global evaluator credential is not configured/i);
-    assert.match(record.nextVerification, /\/qa setup once/);
+    assert.match(record.explanation, /model fixture\/offline is unavailable/i);
+    assert.match(record.nextVerification, /selected Pi model connection/);
     assert.equal(record.agents.reviewer.status, 'completed');
     assert.equal(record.agents.tester.status, 'completed');
   } finally {
@@ -177,13 +177,13 @@ test('cancellation returns an incomplete result, not PASS', async () => {
   try {
     const record = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
+      model: { provider: 'fixture', id: 'offline' },
       settings,
       runner: async input => {
         controller.abort();
         return fakeRunner({})(input);
       },
-      jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {}, signal: controller.signal,
     });
     assert.notEqual(record.verdict, 'PASS');
@@ -201,7 +201,7 @@ test('evaluate reuses the snapshot after a key is added without rerunning agents
   try {
     const first = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore(),
+      model: { provider: 'fixture', id: 'offline' },
       settings,
       runner: async input => {
         launched.push(input.role);
@@ -214,13 +214,13 @@ test('evaluate reuses the snapshot after a key is added without rerunning agents
     assert.equal(first.verdict, 'NOT_VERIFIED');
     const second = await evaluateExisting(first.runId, {
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      model: { provider: 'fixture', id: 'offline' },
+      settings, evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {},
     });
     assert.equal(launched.length, 1);
     assert.equal(second.snapshot.fingerprint, first.snapshot.fingerprint);
-    assert.equal(second.jev.configured, true);
+    assert.equal(second.evaluator.configured, true);
   } finally {
     await rm(dir, { recursive: true, force: true });
     await rm(dest, { recursive: true, force: true });
@@ -234,14 +234,14 @@ test('evaluate compares against the captured checkout, not the new session cwd',
   try {
     const first = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, runner: fakeRunner({}), jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      model: { provider: 'fixture', id: 'offline' },
+      settings, runner: fakeRunner({}), evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {},
     });
     const second = await evaluateExisting(first.runId, {
       cwd: other, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, jevFactory: fakeJev({ criterion: 'supports', relevant: true }), home: dest, env: {},
+      model: { provider: 'fixture', id: 'offline' },
+      settings, evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }), home: dest, env: {},
     });
     assert.notEqual(second.verdict, 'STALE');
     assert.equal(second.snapshot.cwd, dir);
@@ -258,7 +258,7 @@ test('the user checkout is not modified by QA workspace overlay', async () => {
   const before = await readFile(join(dir, 'src.js'), 'utf8');
   try {
     await runQa({
-      cwd: dir, intent: {}, model: { provider: 'fixture', id: 'offline' }, store: memoryStore(),
+      cwd: dir, intent: {}, model: { provider: 'fixture', id: 'offline' },
       settings, runner: fakeRunner({}), home: dest, env: {},
     });
     assert.equal(await readFile(join(dir, 'src.js'), 'utf8'), before);
@@ -274,16 +274,16 @@ test('re-evaluating a stale snapshot preserves the original audited report', asy
   try {
     const first = await runQa({
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, runner: fakeRunner({}), jevFactory: fakeJev({ criterion: 'supports', relevant: true }),
+      model: { provider: 'fixture', id: 'offline' },
+      settings, runner: fakeRunner({}), evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }),
       home: dest, env: {},
     });
     assert.notEqual(first.verdict, 'STALE');
     await writeWorktree(dir, 'src.js', 'export const add = (a, b) => a * b;\n');
     const again = await evaluateExisting(first.runId, {
       cwd: dir, intent: { userRequest: { text: 'Keep add() adding', ref: 'session:user' } },
-      model: { provider: 'fixture', id: 'offline' }, store: memoryStore('k'.repeat(20)),
-      settings, jevFactory: fakeJev({ criterion: 'supports', relevant: true }), home: dest, env: {},
+      model: { provider: 'fixture', id: 'offline' },
+      settings, evaluator: fakeEvaluator({ criterion: 'supports', relevant: true }), home: dest, env: {},
     });
     assert.equal(again.verdict, 'STALE');
     const original = JSON.parse(await readFile(join(dest, 'pi-qa', 'runs', first.runId, 'report.json'), 'utf8')) as { verdict: string };
@@ -302,7 +302,7 @@ test('untracked files appear in the persisted report', async () => {
   try {
     await writeFile(join(dir, 'scratch.ts'), 'export const scratch = true;\n');
     const record = await runQa({
-      cwd: dir, intent: {}, model: { provider: 'fixture', id: 'offline' }, store: memoryStore(),
+      cwd: dir, intent: {}, model: { provider: 'fixture', id: 'offline' },
       settings, runner: fakeRunner({}), home: dest, env: {},
     });
     assert.ok(record.snapshot.untracked.includes('scratch.ts'));

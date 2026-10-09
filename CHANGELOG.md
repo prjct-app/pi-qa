@@ -1,4 +1,23 @@
+## 0.8.0 (2026-10-06)
+
+- Remove classifier routing, credentials and setup; evaluation uses the selected Pi model through the public SDK.
+- Preserve the original mission and corrections across generic follow-ups and compaction.
+- Guard isolated QA context and provider payloads; retain historical report compatibility.
+- Isolate tests from personal credentials and block native keychain access.
+
+## 0.7.7 (2026-10-06)
+
+- Update MCP client to 2.3.1 to fix the credential-disclosure advisory.
+
+## 0.7.6 (2026-10-06)
+
+- Protect direct SDK and optional Jev requests with the published pi-secrets outbound guard.
+
 # Changelog
+
+## 0.7.5 — 2026-10-06
+
+- Evaluate execution evidence with the selected Pi model and inherited reasoning through the public SDK. Reuse parent providers; remove automatic TypeSafe routing and credential requirements.
 
 ## Unreleased
 

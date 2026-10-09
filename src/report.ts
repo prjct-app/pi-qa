@@ -19,9 +19,9 @@ export function formatReport(record: QaRunRecord): string {
       `Run ${record.runId}`,
     ].join('\n'), LIMIT);
   }
-  const jev = record.jev.available
-    ? `${record.jev.modelActual ?? record.jev.modelPin}  in=${record.jev.inputTokens} out=${record.jev.outputTokens}  ${record.jev.latencyMs}ms`
-    : record.jev.configured ? `unavailable${record.jev.error ? ` — ${record.jev.error}` : ''}` : 'not configured';
+  const evaluator = record.evaluator.available
+    ? `${record.evaluator.modelActual ?? record.evaluator.modelPin}  in=${record.evaluator.inputTokens} out=${record.evaluator.outputTokens}  ${record.evaluator.latencyMs}ms`
+    : record.evaluator.configured ? `unavailable${record.evaluator.error ? ` — ${record.evaluator.error}` : ''}` : 'not configured';
   const commands = record.agents.tester.report && 'tests' in record.agents.tester.report
     ? record.agents.tester.report.tests.map(test => `  ${test.exitCode === 0 ? 'pass' : test.skipped ? 'skip' : 'fail'} \`${test.command}\` → ${test.assertion}`).join('\n')
     : '  (none)';
@@ -31,7 +31,7 @@ export function formatReport(record: QaRunRecord): string {
     `Next: ${record.nextVerification}`,
     `Snapshot ${record.snapshot.fingerprint.slice(0, 12)}  base ${short(record.snapshot.base)}  head ${short(record.snapshot.head)}  ${record.snapshot.paths.length} path(s)`,
     `Agents: ${agents}`,
-    `Jev: ${jev}`,
+    `Evaluator: ${evaluator}`,
     'Criteria:',
     criteria || '  (none)',
     'Checks:',

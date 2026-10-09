@@ -1,6 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { IntentContext } from './contract.ts';
-import { branchTaskIds, currentTaskText, lastUserText, taskIds, usesActiveTask } from './task-context.ts';
+import { branchTaskIds, currentTaskText, lastUserText, userRequestHistory, taskIds, usesActiveTask } from './task-context.ts';
 import { loadTicket, markdownPaths } from './tickets.ts';
 import { clip, plain } from './text.ts';
 
@@ -12,7 +12,7 @@ export async function loadIntent(ctx: Pick<ExtensionContext, 'sessionManager' | 
   const ticket = explicit ?? (usesActiveTask(request) ? await activeTicket(cwd, currentTaskText(entries)) : undefined);
   const memory = projectMemory(ctx.getSystemPrompt());
   return {
-    userRequest: user ? { text: user, ref: 'session:user' } : undefined,
+    userRequest: user ? { text: userRequestHistory(entries) ?? user, ref: 'session:user' } : undefined,
     plan,
     ticket,
     memory: memory ? { text: memory, ref: 'pi-memory:project' } : undefined,

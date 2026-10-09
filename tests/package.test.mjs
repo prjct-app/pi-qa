@@ -19,9 +19,8 @@ test('Pi discovers exactly the extension declared by the package manifest', asyn
     assert.equal(extensions.extensions.length, 1);
     assert.equal(resolve(extensions.extensions[0].path), resolve(root, 'index.ts'));
     const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-    assert.equal(manifest.dependencies['@typesafe-ai/sdk'], '0.6.0');
+    assert.equal(manifest.dependencies['@typesafe-ai/sdk'], undefined);
     assert.equal(manifest.peerDependencies['@earendil-works/pi-coding-agent'], '*');
-    assert.equal(manifest.piBuild.external.includes('@napi-rs/keyring'), true);
-    assert.equal(manifest.dependencies['@typesafe-ai/sdk'] !== undefined, true);
+    assert.equal(manifest.dependencies['@napi-rs/keyring'], undefined);
   } finally { await rm(agentDir, { recursive: true, force: true }); }
 });
