@@ -1,3 +1,4 @@
+import { contentText } from '@earendil-works/pi-ai';
 import { protectOutboundData } from '@prjct.app/pi-secrets/privacy';
 import { ModelRuntime, type ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { EvaluatorClient, EvaluatorAnswers } from './evaluator.ts';
@@ -35,7 +36,7 @@ export const createSdkEvaluator = (options: Options): EvaluatorClient => ({
       messages: [{ role: 'user', content: JSON.stringify(await protectOutboundData({ evidence: request.state, questions: request.questions })), timestamp: Date.now() }],
     }, { reasoning: options.thinkingLevel === 'off' ? undefined : options.thinkingLevel ?? 'medium', maxTokens: Math.min(model.maxTokens, 32768), signal });
     if (message.stopReason === 'error' || message.stopReason === 'aborted') throw new Error(message.errorMessage || `Evaluation ${message.stopReason}.`);
-    const text = message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n').trim();
+    const text = contentText(message.content).trim();
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/u, '').replace(/\s*```$/u, '')) as { answers?: EvaluatorAnswers };
     const answers: EvaluatorAnswers = Object.fromEntries(Object.keys(request.questions).map(key => {
       const answer = parsed?.answers?.[key];

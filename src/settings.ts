@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { getAgentDir as agentHome } from '@earendil-works/pi-coding-agent';
 
 export type QaSettings = {
   qaModel?: string;
@@ -22,9 +22,7 @@ export const defaultSettings = (): QaSettings => ({
   patchChars: 200_000,
 });
 
-export const agentHome = (): string => {
-  try { return getAgentDir(); } catch { return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi', 'agent'); }
-};
+export { agentHome };
 
 export const prjctHome = (): string => process.env.PRJCT_HOME ?? join(homedir(), '.prjct');
 

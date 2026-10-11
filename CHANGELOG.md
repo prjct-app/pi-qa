@@ -1,3 +1,7 @@
+## 0.8.1 (2026-10-07)
+
+- Reuse public Pi contentText and getAgentDir helpers for SDK replies and settings paths. Preserve evaluation evidence and model selection.
+
 ## 0.8.0 (2026-10-06)
 
 - Remove classifier routing, credentials and setup; evaluation uses the selected Pi model through the public SDK.
