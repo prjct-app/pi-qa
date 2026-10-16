@@ -2,10 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { brand, completer, openPanel } from '@prjct.app/pi-tui-kit';
+import { brand, completer, openPanel, repairToolArgs, schemaForModel } from '@prjct.app/pi-tui-kit';
 import { COMMAND, CONTRACT_TOOL, CUSTOM_RUN, CUSTOM_STATUS, EvaluationContractSchema, type QaRunRecord } from './schema.ts';
-import { loadIntent } from './context.ts';
-import { evaluateExisting, readLatest, runQa } from './orchestrate.ts';
 import { formatReport } from './report.ts';
 import type { EvaluatorClient } from './evaluator.ts';
 import { selectQaModel } from './model.ts';
@@ -48,7 +46,11 @@ const ACTIONS = [
 
 const OUTPUT_LIMIT = 16_384;
 
+/** Loaded on first /qa: see engine.ts. */
+const engine = () => import('./engine.ts');
+
 export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
+  repairToolArgs(pi, { pi_qa_tester_report: { truncate: true }, pi_qa_reviewer_report: { truncate: true } });
   const slot: { current: State } = { current: { closed: false } };
   const serialSlot: { serial: Promise<unknown> } = { serial: Promise.resolve() };
   const ctxSlot: { command?: ExtensionContext } = {};
@@ -119,7 +121,8 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     label: 'QA contract',
     description: 'Submit a dynamic evaluation contract for the next /qa run. Inferred items must use source inferred_from_diff; do not relabel them as user requirements. '
       + `Write description, text and observe in plain, simple English, even when the person wrote in another language; sourceText stays a verbatim quote.`,
-    parameters: EvaluationContractSchema,
+    // Limits stay out of what the model reads; checkContract validates the full schema below.
+    parameters: schemaForModel(EvaluationContractSchema),
     execute: async (_id, params) => {
       if (!checkContract(params)) {
         return { content: [{ type: 'text' as const, text: 'Contract rejected: schema validation failed.' }], details: {} };
@@ -176,6 +179,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
     }
     ctx.ui.setStatus?.('qa', request ? 'capturing QA target…' : 'capturing snapshot…');
     try {
+      const { loadIntent, runQa } = await engine();
       const context = await loadIntent(ctx, runCwd, targetMission);
       const intent = targetMission && !usesActiveTask(targetMission)
         ? { ...context, userRequest: { text: targetMission, ref: 'command:/qa' } } : context;
@@ -221,6 +225,7 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
   };
 
   const runEvaluate = async (ctx: ExtensionCommandContext, runId?: string) => {
+    const { readLatest, evaluateExisting } = await engine();
     const id = runId ?? get().lastRunId ?? await readLatest(deps.home ?? prjctHome());
     if (!id) {
       output('No captured snapshot. Starting a fresh QA run.');
