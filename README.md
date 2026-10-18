@@ -67,16 +67,7 @@ Instructions and agent reports are in English. Source requests and ticket quotes
 
 QA runs one case per required outcome and no others. It does not add a case per changed file, edge, tool, or developer check. A failed extra probe does not veto a required outcome that was observed. Expected behavior comes from the user, ticket, spec, or existing tests. A default smoke expectation is limited to successful load/launch, no crash, and a responding primary command or endpoint, and only when nothing was requested. If none is defensible, the case is `BLOCKED`; QA does not invent PASS.
 
-Host wrappers around `bash` and `qa_browser` issue immutable execution receipts. Agent-written output without a matching receipt is not evidence. Playwright can capture DOM text, screenshots, hashes, and traces.
-
-### WebMCP
-
-`qa_browser` launches Chrome with WebMCP on (`--enable-features=WebMCPTesting`, Chrome 149+; the Playwright Chromium qualifies). When the page under test registers [WebMCP](https://webmachinelearning.github.io/webmcp/) tools on `document.modelContext`, the QA agent can use them next to clicks:
-
-- `tools` lists the tools the open page registers (name, description, input schema, annotations such as `readOnly` or `consequential`) and saves that manifest as a hashed artifact.
-- `call_tool` runs one tool by `name` with `input` as JSON object text. It reports the tool's output, whether it threw, how the input compares to the tool's schema, whether the page text changed, and the page afterwards.
-
-The agent drives the requested journey through tools but confirms the effect in the page text or a screenshot, never from tool output alone. It does not add a case per tool, schema, or invalid input unless a required item asks for that. A tool that throws is an observation with a completed receipt; a tool the page never registered fails the call. Chrome reports a throwing tool as `UnknownError: Tool was executed but the invocation failed`, without the page's own message. Pages without WebMCP tools are tested with open, click, fill and press as before.
+Host wrappers around `bash` and `qa_browser` issue immutable execution receipts. Agent-written output without a matching receipt is not evidence. Playwright can capture DOM text, screenshots, hashes, and traces. Web journeys use open, click, fill and press.
 
 ### MCP Apps
 

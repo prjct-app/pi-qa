@@ -2,6 +2,7 @@
 
 - Run one case per required outcome. Do not generate a case per changed file, edge, tool, or developer check.
 - A failed extra probe no longer vetoes a required outcome that was observed.
+- QA no longer instructs the agent to use or test WebMCP.
 
 ## 0.8.1 (2026-10-07)
 
