@@ -22,6 +22,8 @@ A usable case needs expected behavior, its source, a procedure, and host evidenc
 4. existing test;
 5. minimal smoke defaults: load/launch, no crash, primary command or endpoint responds.
 
+The agent executes one public-interface case per required item. Changed files, edges, tools, and developer checks do not become cases, and a failed extra probe does not veto an observed required outcome.
+
 Missing or merely inferred expected behavior is `BLOCKED`, never `PASS`.
 
 ## Snapshot and workspace

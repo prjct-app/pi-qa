@@ -57,7 +57,7 @@ For local artifacts, use an explicit path: `/qa --target ./pi-qa smoke test this
 
 The command text becomes a required `user_request` criterion. Without it, QA retains the latest actual user request after assistant/tool messages. Generic testing follow-ups also consider the immediately preceding task exchange; older unrelated exchanges and tool results are ignored. Every item is `user_request`, `ticket`, `plan`, or `inferred_from_diff`; inferred items never prove unstated intent.
 
-The main model may submit a contract with the `pi_qa_contract` tool before `/qa`. Relabeled inferred items are reclassified.
+The main model may submit a contract with the `pi_qa_contract` tool before `/qa`. Relabeled inferred items are reclassified. Inferred file probes and optional notes are dropped; they are not cases.
 
 ## QA agent
 
@@ -65,7 +65,7 @@ One isolated Pi session performs behavioral QA, not code review. It exercises br
 
 Instructions and agent reports are in English. Source requests and ticket quotes remain verbatim; there is no separate translation-model call. QA tests the captured branch and worktree; base refs are comparison points, not merge targets. Every case records expected behavior, its source, procedure, observation, receipts and artifacts.
 
-Expected behavior comes from the user, ticket, spec, or existing tests. A default smoke expectation is limited to successful load/launch, no crash, and a responding primary command or endpoint. If none is defensible, the case is `BLOCKED`; QA does not invent PASS.
+QA runs one case per required outcome and no others. It does not add a case per changed file, edge, tool, or developer check. A failed extra probe does not veto a required outcome that was observed. Expected behavior comes from the user, ticket, spec, or existing tests. A default smoke expectation is limited to successful load/launch, no crash, and a responding primary command or endpoint, and only when nothing was requested. If none is defensible, the case is `BLOCKED`; QA does not invent PASS.
 
 Host wrappers around `bash` and `qa_browser` issue immutable execution receipts. Agent-written output without a matching receipt is not evidence. Playwright can capture DOM text, screenshots, hashes, and traces.
 
@@ -76,7 +76,7 @@ Host wrappers around `bash` and `qa_browser` issue immutable execution receipts.
 - `tools` lists the tools the open page registers (name, description, input schema, annotations such as `readOnly` or `consequential`) and saves that manifest as a hashed artifact.
 - `call_tool` runs one tool by `name` with `input` as JSON object text. It reports the tool's output, whether it threw, how the input compares to the tool's schema, whether the page text changed, and the page afterwards.
 
-The agent drives state through tools but confirms every effect in the page text or a screenshot, never from tool output alone. It also tests the tools: registration, descriptions and schemas, the happy path, missing or mistyped input (Chrome does not validate inputs against the schema, so the page must), and read-only tools leaving the page unchanged. A tool that throws is an observation with a completed receipt, so negative cases have evidence; a tool the page never registered fails the call. Chrome reports a throwing tool as `UnknownError: Tool was executed but the invocation failed`, without the page's own message. Pages without WebMCP tools are tested with open, click, fill and press as before.
+The agent drives the requested journey through tools but confirms the effect in the page text or a screenshot, never from tool output alone. It does not add a case per tool, schema, or invalid input unless a required item asks for that. A tool that throws is an observation with a completed receipt; a tool the page never registered fails the call. Chrome reports a throwing tool as `UnknownError: Tool was executed but the invocation failed`, without the page's own message. Pages without WebMCP tools are tested with open, click, fill and press as before.
 
 ### MCP Apps
 

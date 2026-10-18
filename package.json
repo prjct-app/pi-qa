@@ -1,6 +1,6 @@
 {
   "name": "@prjct.app/pi-qa",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Run an isolated QA agent in PI Agent, capture auditable execution evidence, and evaluate explicit targets with the selected Pi model.",
   "type": "module",
   "license": "MIT",

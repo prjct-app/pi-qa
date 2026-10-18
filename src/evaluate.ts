@@ -1,4 +1,5 @@
-import { deterministicChecks, testHasVerifiedExecution } from './evidence.ts';
+import { decisiveCases } from './agile.ts';
+import { deterministicChecks, requiredExplicit, testHasVerifiedExecution } from './evidence.ts';
 import { evaluateQaBatch, type EvaluatorClient, type JsonState, type QaBatchSubject } from './evaluator.ts';
 import type { CriterionEvaluation, EvaluationContract, ExecutionReceipt, EvaluatorDecision, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
 import type { QaSettings } from './settings.ts';
@@ -26,21 +27,22 @@ export async function evaluateEvidence(input: {
   evaluator: { modelActual?: string; error?: string; inputTokens: number; outputTokens: number };
 }> {
   const checks = deterministicChecks(input.snapshot, { findings: [], notes: '', blockers: [] }, input.tester, input.executions);
-  const tests = input.tester.tests.filter(test => !test.skipped && testHasVerifiedExecution(test, checks));
+  const requirements = requiredExplicit(input.contract);
+  const tests = decisiveCases(input.tester.tests, requirements.map(item => item.id)).filter(test => testHasVerifiedExecution(test, checks));
   const testSubjects: QaBatchSubject[] = tests.map((test, index) => ({
     key: `test_${index}`,
     subjectId: test.id,
     question: 'test',
     prompt: `Does the host-recorded evidence support, contradict, or fail to establish the expected behavior for test case ${test.id}?`,
   }));
-  const criterionSubjects: QaBatchSubject[] = input.contract.items.map((item, index) => ({
+  const criterionSubjects: QaBatchSubject[] = requirements.map((item, index) => ({
     key: `criterion_${index}`,
     subjectId: item.id,
     question: 'criterion',
-    prompt: `Do the executed black-box scenarios support, contradict, or fail to establish behavior ${item.id}? Code review, unit tests, lint and builds alone do not establish application behavior. For a web flow require browser observations; for an API require real endpoint requests and responses.`,
+    prompt: `Do the executed public-interface cases support, contradict, or fail to establish the requested outcome of ${item.id}? Support it when a case observes that outcome. Do not withhold support because unrequested edges, files, tools, or developer checks were not run. Code review, unit tests, lint and builds alone do not establish application behavior. For a web flow require browser observations; for an API require real endpoint requests and responses.`,
   }));
   const subjects = [...testSubjects, ...criterionSubjects];
-  const state = batchState(input.contract, tests, input.executions, input.settings);
+  const state = batchState({ ...input.contract, items: requirements.length > 0 ? requirements : input.contract.items }, tests, input.executions, input.settings);
   const batch = input.client
     ? await evaluateQaBatch(input.client, state, subjects, input.settings, input.signal)
     : {

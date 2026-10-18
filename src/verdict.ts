@@ -1,4 +1,5 @@
 import type { AgentOutcome, CriterionEvaluation, DeterministicCheck, EvaluationContract, EvaluatorDecision, QaVerdict, ReviewerReport, Snapshot, TesterReport } from './schema.ts';
+import { decisiveCases } from './agile.ts';
 import { behaviorGap } from './behavior.ts';
 
 export type VerdictInput = {
@@ -28,7 +29,9 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
   if (input.snapshotError) {
     return result('NOT_VERIFIED', input.snapshotError, 'Provide a local --base <ref> or make a change to evaluate.', [input.snapshotError]);
   }
-  const failedChecks = substantiatedProductFailures(input);
+  const requiredIds = input.criteria.filter(item => item.required && item.source !== 'inferred_from_diff').map(item => item.id);
+  const decisive = decisiveCases(input.testerReport.tests, requiredIds);
+  const failedChecks = substantiatedProductFailures(input, decisive);
   const contradicted = input.criteria.filter(item => item.required && item.source !== 'inferred_from_diff' && item.label === 'contradicts');
   if (failedChecks.length || contradicted.length) {
     const reasons = [
@@ -49,8 +52,8 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
       return result('NOT_VERIFIED', `QA completed, but evaluation failed: ${input.evaluatorError}`, 'Restore the selected Pi model connection, then /qa evaluate this run.', ['Evaluator unavailable']);
     }
     const missingTarget = input.snapshot?.scope === 'target' && input.snapshot.paths.length === 0;
-    const unverifiedExecution = input.testerReport.tests.some(test => test.skipped
-      || !(input.checks ?? []).some(check => check.subjectId === test.id && check.kind === 'test-provenance' && check.ok)
+    const unverifiedExecution = decisive.length === 0 || decisive.some(test =>
+      !(input.checks ?? []).some(check => check.subjectId === test.id && check.kind === 'test-provenance' && check.ok)
       || !(input.checks ?? []).some(check => check.subjectId === test.id && check.kind === 'test-definition' && check.ok));
     if (missingTarget || unverifiedExecution) {
       return result(
@@ -64,9 +67,7 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
     }
     return result('NOT_VERIFIED', 'Deterministic evidence did not fully establish the requested behavior; semantic evaluation is unavailable.', 'Add or clarify the blocked test case, then run /qa again.', ['Semantic evaluation unavailable']);
   }
-  const unresolvedChecks = input.testerReport.tests.filter(test =>
-    !test.skipped && test.exitCode !== 0 && !failedChecks.includes(test.id),
-  );
+  const unresolvedChecks = decisive.filter(test => test.exitCode !== 0 && !failedChecks.includes(test.id));
   if (unresolvedChecks.length) {
     const first = unresolvedChecks[0]!;
     return result(
@@ -87,7 +88,7 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
   if (unasserted.length) {
     return result('NOT_VERIFIED', `Tests did not assert required behavior: ${unasserted.map(item => item.id).join(', ')}. Green exits are not enough.`, `Add a check that asserts ${unasserted[0]!.id}.`, unasserted.map(item => `${item.id} was not asserted`));
   }
-  const unsupportedCases = input.testerReport.tests.filter(test => !test.skipped && !(input.testEvaluator ?? []).some(decision => decision.subjectId === test.id && decision.question === 'test' && decision.label === 'supports'));
+  const unsupportedCases = decisive.filter(test => !(input.testEvaluator ?? []).some(decision => decision.subjectId === test.id && decision.question === 'test' && decision.label === 'supports'));
   if (unsupportedCases.length) {
     return result('NOT_VERIFIED', `Evaluator did not support test case(s): ${unsupportedCases.map(test => test.id).join(', ')}.`, `Clarify or rerun ${unsupportedCases[0]!.id}.`, unsupportedCases.map(test => `${test.id}: evaluator did not support expected behavior`));
   }
@@ -96,8 +97,8 @@ export function decideVerdict(input: VerdictInput): { verdict: QaVerdict; explan
   return result('PASS', 'All required behaviors have supporting test evidence and the required test cases passed.', 'No further verification required for this snapshot.', []);
 }
 
-const substantiatedProductFailures = (input: VerdictInput): string[] =>
-  input.testerReport.tests.filter(test =>
+const substantiatedProductFailures = (input: VerdictInput, decisive: ReturnType<typeof decisiveCases>): string[] =>
+  decisive.filter(test =>
     !test.skipped
     && (input.checks ?? []).some(check => check.subjectId === test.id && check.kind === 'test-provenance' && check.ok)
     && (input.checks ?? []).some(check => check.subjectId === test.id && check.kind === 'test-definition' && check.ok)
@@ -105,7 +106,8 @@ const substantiatedProductFailures = (input: VerdictInput): string[] =>
   ).map(test => test.id);
 
 const nextFail = (input: VerdictInput): string => {
-  const test = input.testerReport.tests.find(item => !item.skipped && item.exitCode !== 0);
+  const requiredIds = input.criteria.filter(item => item.required && item.source !== 'inferred_from_diff').map(item => item.id);
+  const test = decisiveCases(input.testerReport.tests, requiredIds).find(item => item.exitCode !== 0);
   if (test) return `Fix the failure of \`${test.command}\` and re-run /qa.`;
   return 'Resolve the contradicted criterion and re-run /qa.';
 };

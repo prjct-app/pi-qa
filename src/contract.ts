@@ -50,26 +50,18 @@ export function deriveContract(intent: IntentContext, changedPaths: string[], de
     ...(intent.ticket?.dor ?? []).map((text, index) => item(`T-DOR${index + 1}`, text, 'ticket', intent.ticket!.ref, text, false, 'Record whether Definition of Ready still holds.')),
     ...(intent.ticket?.dod ?? []).map((text, index) => item(`T-DOD${index + 1}`, text, 'ticket', intent.ticket!.ref, text, true, 'Assert the Definition of Done item.')),
   ];
-  const inferred = fromUser.length + fromPlan.length + fromTicket.length === 0
-    ? changedPaths.slice(0, 12).map((path, index) => item(
-      `I${index + 1}`,
-      `The change to ${path} behaves as the diff implements it and does not introduce an obvious regression.`,
+  const inferred = fromUser.length + fromPlan.length + fromTicket.length === 0 && changedPaths.length > 0
+    ? [item(
+      'I1',
+      'Smoke: the captured change loads and its primary command or endpoint responds. Do not invent unstated behavior or a case per file.',
       INFERRED,
-      path,
+      changedPaths[0] ?? 'diff',
       undefined,
       false,
-      `Inspect ${path} and run a check that would fail if the new behavior is broken.`,
-    ))
-    : changedPaths.slice(0, 8).map((path, index) => item(
-      `I${index + 1}`,
-      `Inferred: ${path} should not regress adjacent behavior.`,
-      INFERRED,
-      path,
-      undefined,
-      false,
-      `Look for a test or invariant covering ${path}.`,
-    ));
-  return {
+      'Run one public-interface smoke check. Do not add a case per changed file.',
+    )]
+    : [];
+  return focusContract({
     description: description
       ?? intent.userRequest?.english
       ?? intent.userRequest?.text
@@ -78,12 +70,19 @@ export function deriveContract(intent: IntentContext, changedPaths: string[], de
       ?? (changedPaths.length ? `Inspect the current diff (${changedPaths.length} path(s)).` : 'No written intent and no diff to evaluate.'),
     items: [...fromUser, ...fromPlan, ...fromTicket, ...inferred],
     invariants: [],
-    regressionRisks: inferred.map(entry => entry.text),
+    regressionRisks: [],
     definitionOfReady: intent.ticket?.dor ?? [],
     definitionOfDone: intent.ticket?.dod ?? [],
     ticketRef: intent.ticket?.ref,
     ticketFingerprint: intent.ticket?.fingerprint,
-  };
+  });
+}
+
+/** Keep required outcomes only. Inferred file probes and optional notes are not cases. */
+export function focusContract(contract: EvaluationContract): EvaluationContract {
+  const required = contract.items.filter(item => item.required && item.source !== INFERRED);
+  const smoke = contract.items.filter(item => item.source === INFERRED).slice(0, 1);
+  return { ...contract, items: required.length > 0 ? required : smoke, regressionRisks: [] };
 }
 
 export function ticketStale(contract: EvaluationContract, current?: string): boolean {
