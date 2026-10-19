@@ -1,26 +1,21 @@
 ## Summary
 
-## Branch flow
-
-- [ ] Normal changes target `develop`, or this is a grouped `develop` → `main` promotion
-- [ ] The branch is based on the applicable integration branch
-
 ## Official Pi API compliance
 
-- [ ] Uses public APIs documented by Pi 0.85.1; no host internals or prototype patches
+- [ ] Uses only APIs documented by Pi 0.85.1
+- [ ] Exposes exactly one Pi extension entry point
+- [ ] No internal `dist/` imports or prototype patches
 - [ ] Pi-provided packages remain peer dependencies
 
-## Safety and compatibility
+## Safety and provenance
 
-- [ ] No automatic browser launch or HTML execution
-- [ ] Project trust, cancellation, and session teardown are respected
-- [ ] No credentials, private paths, or production data are included
-- [ ] Protocol and Pi compatibility claims match tests
+- [ ] No credentials, conversations, private paths, or user configuration
+- [ ] Required licenses and provenance notices are included
 
 ## Verification
 
 - [ ] `npm run check`
 - [ ] `npm test`
-- [ ] `npm run check:package`
+- [ ] `npm pack --dry-run`
 
 ## Limitations and manual verification

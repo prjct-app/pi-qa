@@ -38,7 +38,8 @@
     "check:package": "npm pack --dry-run --ignore-scripts",
     "build": "rm -rf build && mkdir -p build && npm pack --ignore-scripts --pack-destination build >/dev/null && tar -xzf build/*.tgz -C build --strip-components=1 && rm -f build/*.tgz",
     "check:immutable": "! grep -rn '\\blet\\b' src/ || (echo 'Use immutable values: no let bindings in src/' && exit 1)",
-    "build:pi": "node scripts/build-pi.mjs"
+    "build:pi": "node scripts/build-pi.mjs",
+    "prepublishOnly": "node -e \"if (process.env.GITHUB_ACTIONS !== 'true') { console.error('Publish only from the Release workflow: merge to main.'); process.exit(1); }\""
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=1.0.4",
