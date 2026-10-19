@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { brand, completer, openPanel } from '@prjct.app/pi-tui-kit';
 import { COMMAND, CONTRACT_TOOL, CUSTOM_RUN, CUSTOM_STATUS, EvaluationContractSchema, type QaRunRecord } from './schema.ts';
+import { focusContract } from './contract.ts';
 import { loadIntent } from './context.ts';
 import { evaluateExisting, readLatest, runQa } from './orchestrate.ts';
 import { formatReport } from './report.ts';
@@ -117,16 +118,18 @@ export function installQa(pi: ExtensionAPI, deps: QaDependencies = {}): void {
   pi.registerTool({
     name: CONTRACT_TOOL,
     label: 'QA contract',
-    description: 'Submit a dynamic evaluation contract for the next /qa run. Inferred items must use source inferred_from_diff; do not relabel them as user requirements. '
+    description: 'Submit a dynamic evaluation contract for the next /qa run. Submit only required outcomes, one item each. Do not add inferred file, regression, or developer-check items; they are dropped and are not cases. Inferred items must use source inferred_from_diff; do not relabel them as user requirements. '
       + `Write description, text and observe in plain, simple English, even when the person wrote in another language; sourceText stays a verbatim quote.`,
     parameters: EvaluationContractSchema,
     execute: async (_id, params) => {
       if (!checkContract(params)) {
         return { content: [{ type: 'text' as const, text: 'Contract rejected: schema validation failed.' }], details: {} };
       }
-      set({ pendingContract: params });
-      pi.appendEntry(CUSTOM_RUN, { kind: 'contract', description: params.description, items: params.items.length });
-      return { content: [{ type: 'text' as const, text: `Contract stored (${params.items.length} items) for the next /qa run.` }], details: {} };
+      const focused = focusContract(params);
+      const dropped = params.items.length - focused.items.length;
+      set({ pendingContract: focused });
+      pi.appendEntry(CUSTOM_RUN, { kind: 'contract', description: focused.description, items: focused.items.length });
+      return { content: [{ type: 'text' as const, text: `Contract stored (${focused.items.length} required items) for the next /qa run.${dropped > 0 ? ` Dropped ${dropped} inferred or optional item(s); they are not cases.` : ''}` }], details: {} };
     },
   });
 

@@ -1,3 +1,9 @@
+## 0.8.2 (2026-10-18)
+
+- Run one case per required outcome. Do not generate a case per changed file, edge, tool, or developer check.
+- A failed extra probe no longer vetoes a required outcome that was observed.
+- QA no longer instructs the agent to use or test WebMCP.
+
 ## 0.8.1 (2026-10-07)
 
 - Reuse public Pi contentText and getAgentDir helpers for SDK replies and settings paths. Preserve evaluation evidence and model selection.

@@ -180,7 +180,7 @@ const toolActivity = (toolName: string, args: Record<string, unknown>): string =
   if (toolName === TESTER_REPORT_TOOL) return 'Finalizing test cases…';
   if (toolName === 'bash') return `Running command: ${redact(clip(plain(args.command ?? ''), 140))}`;
   if (toolName === 'read') return `Reading ${clip(plain(args.path ?? 'file'), 120)}…`;
-  if (toolName === 'qa_browser' && args.action === 'call_tool') return `WebMCP: ${clip(plain(args.name ?? 'tool'), 60)}…`;
+  if (toolName === 'qa_browser' && args.action === 'call_tool') return `Browser tool: ${clip(plain(args.name ?? 'tool'), 60)}…`;
   if (toolName === 'qa_browser' && typeof args.action === 'string' && args.action.startsWith('app_')) return `MCP App: ${clip(plain(args.action === 'app_open' ? args.name ?? 'tool' : args.action.slice(4)), 60)}…`;
   if (toolName === 'qa_browser') return `Browser: ${clip(plain(args.action ?? 'interaction'), 60)}…`;
   return `Using ${toolName}…`;

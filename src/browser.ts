@@ -13,16 +13,17 @@ import { callWebMcpTool, listWebMcpTools, WEBMCP_ARGS } from './webmcp.ts';
 export { browserExecutable } from './browser-executable.ts';
 export { schemaProblems, WEBMCP_ARGS, type WebMcpTool } from './webmcp.ts';
 
-const ACTIONS = ['open', 'snapshot', 'click', 'fill', 'press', 'screenshot', 'tools', 'call_tool', 'app_connect', 'app_tools', 'app_open', 'app_log', 'close'] as const;
+const MODEL_ACTIONS = ['open', 'snapshot', 'click', 'fill', 'press', 'screenshot', 'app_connect', 'app_tools', 'app_open', 'app_log', 'close'] as const;
+const ACTIONS = [...MODEL_ACTIONS, 'tools', 'call_tool'] as const;
 
 const BrowserActionSchema = Type.Object({
-  action: Type.Union(ACTIONS.map(action => Type.Literal(action))),
+  action: Type.Union(MODEL_ACTIONS.map(action => Type.Literal(action))),
   url: Type.Optional(Type.String({ maxLength: 4096, description: 'Page URL for open, or a streamable HTTP MCP server URL for app_connect.' })),
   selector: Type.Optional(Type.String({ maxLength: 2048 })),
   value: Type.Optional(Type.String({ maxLength: 4096 })),
   key: Type.Optional(Type.String({ maxLength: 64 })),
-  name: Type.Optional(Type.String({ maxLength: 128, description: 'Screenshot name, the WebMCP tool for call_tool, or the MCP tool for app_open.' })),
-  input: Type.Optional(Type.String({ maxLength: 16_384, description: 'Tool input for call_tool and app_open, as JSON object text, e.g. {"sku":"A1"}. Defaults to {}.' })),
+  name: Type.Optional(Type.String({ maxLength: 128, description: 'Screenshot name, or the MCP tool for app_open.' })),
+  input: Type.Optional(Type.String({ maxLength: 16_384, description: 'Tool input for app_open, as JSON object text. Defaults to {}.' })),
   command: Type.Optional(Type.String({ maxLength: 1024, description: 'app_connect: executable of a stdio MCP server, run in the QA workspace.' })),
   args: Type.Optional(Type.Array(Type.String({ maxLength: 1024 }), { maxItems: 32, description: 'app_connect: arguments for command.' })),
 });
@@ -53,8 +54,7 @@ export type QaBrowserSession = {
 };
 
 const DESCRIPTION = [
-  'Stateful Playwright browser for QA evidence. Open a URL, inspect textual DOM state, interact, and capture screenshot/trace artifacts. Screenshots are evidence only when paired with a textual observation.',
-  'WebMCP: `tools` lists the typed tools the open page registers (document.modelContext); `call_tool` runs one by `name` with `input` as JSON object text and reports its output, whether it threw, how the input compares to its schema, and the page afterwards.',
+  'Stateful Playwright browser for QA evidence. Open a URL, inspect textual DOM state, interact with open, click, fill and press, and capture screenshot/trace artifacts. Screenshots are evidence only when paired with a textual observation.',
   'MCP Apps: `app_connect` starts a stdio MCP server (`command`, `args`, run in the QA workspace) or connects to `url`; `app_tools` lists its tools and their `ui://` resources; `app_open` calls a tool by `name` with `input` and renders its UI like Claude or ChatGPT would, after which click, fill, press, snapshot and screenshot act inside the app; `app_log` shows every message between app and host, CSP violations, and console errors.',
 ].join(' ');
 
@@ -153,7 +153,7 @@ export const createQaBrowser = (artifactDir: string, options: { cwd?: string } =
   const special = async (params: BrowserAction): Promise<BrowserResult | undefined> => {
     if (params.action === 'close') { await close(); return textResult('Browser session closed; trace persisted.', { artifacts }); }
     if (params.action === 'tools') return listWebMcpTools(kit);
-    if (params.action === 'call_tool') return callWebMcpTool(kit, required(params.name, 'call_tool requires name (the WebMCP tool name).'), params.input ?? '{}');
+    if (params.action === 'call_tool') return callWebMcpTool(kit, required(params.name, 'call_tool requires name.'), params.input ?? '{}');
     if (params.action === 'app_connect') return apps.connect({ ...(params.command ? { command: params.command, args: params.args ?? [] } : {}), ...(params.url ? { url: params.url } : {}) });
     if (params.action === 'app_tools') return apps.tools();
     if (params.action === 'app_open') return apps.open(required(params.name, 'app_open requires name (the MCP tool whose UI to render).'), params.input ?? '{}');

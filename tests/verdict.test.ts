@@ -139,6 +139,46 @@ test('a failed test case is FAIL only with verified definition and execution', (
   assert.equal(substantiated.verdict, 'FAIL');
 });
 
+test('a failed developer check does not veto a supported required outcome', () => {
+  const result = decideVerdict({
+    contract: emptyContract(),
+    criteria: [criterion()],
+    reviewer: done('reviewer'),
+    tester: done('tester'),
+    reviewerReport: emptyReviewer(),
+    testerReport: {
+      tests: [
+        { id: 'journey', kind: 'ui', command: 'open app', cwd: '.', exitCode: 0, expected: 'add works', expectedSource: 'user', observed: 'saved', assertion: 'add works', contractItemIds: ['U1'] },
+        { id: 'typecheck', kind: 'build', command: 'npm run typecheck', cwd: '.', exitCode: 2, expected: 'types pass', expectedSource: 'inferred', observed: 'unrelated error', assertion: 'typecheck', contractItemIds: ['U1'] },
+        { id: 'launch-web', kind: 'e2e', command: 'start browser', cwd: '.', exitCode: 1, expected: 'browser opens', expectedSource: 'user', observed: 'port in use', assertion: 'launch', contractItemIds: ['U1'] },
+      ],
+      notes: '',
+    },
+    findingEvaluator: [],
+    testEvaluator: [testDecision('journey', 'supports')],
+    stale: false,
+    evaluatorAvailable: true,
+  });
+  assert.equal(result.verdict, 'PASS');
+});
+
+test('the only failed public-interface case still blocks', () => {
+  const result = decideVerdict({
+    contract: emptyContract(),
+    criteria: [criterion({ tests: ['launch-web'], label: 'insufficient_evidence' })],
+    reviewer: done('reviewer'),
+    tester: done('tester'),
+    reviewerReport: emptyReviewer(),
+    testerReport: { tests: [{ id: 'launch-web', kind: 'e2e', command: 'start browser', cwd: '.', exitCode: 1, expected: 'app opens', expectedSource: 'user', observed: 'refused', assertion: 'launch', contractItemIds: ['U1'] }], notes: '' },
+    findingEvaluator: [],
+    testEvaluator: [],
+    stale: false,
+    evaluatorAvailable: true,
+  });
+  assert.equal(result.verdict, 'NOT_VERIFIED');
+  assert.match(result.explanation, /launch-web/);
+});
+
 test('PASS requires supported required explicit criteria, relevant tests, and passed test cases', () => {
   const result = decideVerdict({
     contract: emptyContract(),

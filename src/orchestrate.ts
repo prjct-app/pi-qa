@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { join } from 'node:path';
-import { deriveContract, fingerprintText, sanitizeContract, ticketStale, type IntentContext } from './contract.ts';
+import { deriveContract, fingerprintText, focusContract, sanitizeContract, ticketStale, type IntentContext } from './contract.ts';
 import { evaluateEvidence } from './evaluate.ts';
 import type { EvaluatorClient } from './evaluator.ts';
 import { createSdkEvaluator } from './sdk-evaluator.ts';
@@ -159,7 +159,8 @@ const buildContract = (pending: unknown, intent: IntentContext, captured: Captur
       };
     }
     const sanitized = sanitizeContract(pending, intent);
-    if (sanitized.contract.items.length) return sanitized;
+    const focused = focusContract(sanitized.contract);
+    if (focused.items.length) return { contract: focused, problems: sanitized.problems };
     return { contract: deriveContract(intent, captured.snapshot.paths.map(path => path.path), intent.userRequest?.english ?? intent.userRequest?.text), problems: sanitized.problems };
   }
   return { contract: deriveContract(intent, captured.snapshot.paths.map(path => path.path), intent.userRequest?.english ?? intent.userRequest?.text), problems: [] };
