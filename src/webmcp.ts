@@ -20,7 +20,7 @@ export type WebMcpTool = {
 
 /** What Chrome hands back for a registered tool (inputSchema is JSON text). */
 type RegisteredTool = { name: string; title?: string; description?: string; inputSchema?: string; annotations?: Record<string, boolean>; origin?: string };
-type ModelContext = { getTools?: () => Promise<RegisteredTool[]>; executeTool?: (tool: RegisteredTool, input: string) => Promise<unknown> };
+type ModelContext = { getTools?: () => Promise<RegisteredTool[]>; executeTool?: (tool: RegisteredTool, input: Record<string, unknown> | string) => Promise<unknown> };
 
 /**
  * The page's WebMCP tools, or undefined when it exposes no document.modelContext.
@@ -67,13 +67,19 @@ export const callWebMcpTool = async (kit: BrowserKit, name: string, inputText: s
   const tool = tools.find(candidate => candidate.name === name);
   if (!tool) throw new Error(`WebMCP: ${page.url()} registers no tool named ${name}. Registered: ${tools.map(candidate => candidate.name).join(', ') || 'none'}.`);
   const before = await scopeText(await pageScope(page));
-  const outcome = await page.evaluate(async ([toolName, json]) => {
+  const outcome = await page.evaluate(async ([toolName, args]) => {
     const context = (document as Document & { modelContext?: ModelContext }).modelContext;
     const registered = (await context?.getTools?.() ?? []).find(candidate => candidate.name === toolName);
     if (!context?.executeTool || !registered) return { ok: false, output: `Tool ${toolName} disappeared before it ran.` };
-    try { return { ok: true, output: await context.executeTool(registered, json) }; }
-    catch (error) { return { ok: false, output: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }; }
-  }, [name, JSON.stringify(input)] as const);
+    try {
+      // Current Chrome takes the input object; older builds took its JSON text.
+      try { return { ok: true, output: await context.executeTool(registered, args) }; }
+      catch (error) {
+        if (!(error instanceof TypeError) || !/string|json/i.test(error.message)) throw error;
+        return { ok: true, output: await context.executeTool(registered, JSON.stringify(args)) };
+      }
+    } catch (error) { return { ok: false, output: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }; }
+  }, [name, input] as const);
   await page.waitForTimeout(200);
   const after = await pageScope(page);
   const changed = before !== await scopeText(after);
