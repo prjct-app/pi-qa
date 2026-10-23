@@ -30,7 +30,7 @@
     "CHANGELOG.md"
   ],
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=22.23.4"
   },
   "scripts": {
     "check": "tsc --noEmit && npm run check:immutable",
